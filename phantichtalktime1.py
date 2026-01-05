@@ -196,4 +196,5 @@ if uploaded_file:
     st.plotly_chart(px.bar(final_df[final_df['📊 RESULT'] != "OFF"], x='Sales Name', y='pct_val', color='pct_val', color_continuous_scale='Blues', text_auto='.1f', height=300, title="📊 HIỆU SUẤT TỔNG THỂ (%)"), use_container_width=True)
     st.sidebar.download_button("📥 Export CSV", disp_df.to_csv(index=False).encode('utf-8-sig'), f"Report_{real_time_date}.csv")
 else:
-    st.info("👋 Chào Team Henry! Hãy tải file RingCentral nhé.")
+
+    st.info("👋 Chào Team Henry! Hãy chọn detailed và tải file RingCentral, add vào Browes Files nhé.")
