@@ -2,12 +2,14 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
+import pytz  # Thư viện xử lý múi giờ
 
 # --- 1. CẤU HÌNH TRANG & UI LUXURY ---
 st.set_page_config(page_title="Dream Talent - Henry Master Hub", layout="wide")
 
-# Lấy thời gian tĩnh
-now = datetime.now()
+# XỬ LÝ MÚI GIỜ MIỀN ĐÔNG HOA KỲ (EST/EDT)
+tz_US_Eastern = pytz.timezone('US/Eastern')
+now = datetime.now(tz_US_Eastern)
 static_time = now.strftime("%m/%d/%Y | %H:%M")
 file_date = now.strftime("%m-%d-%Y")
 
@@ -67,8 +69,8 @@ if 'input_df' not in st.session_state:
     }).set_index("Sales Name")
 
 def update_input():
-    if "editor_v78" in st.session_state:
-        for row_idx, changes in st.session_state["editor_v78"]["edited_rows"].items():
+    if "editor_v81" in st.session_state:
+        for row_idx, changes in st.session_state["editor_v81"]["edited_rows"].items():
             for k, v in changes.items():
                 st.session_state.input_df.iloc[row_idx, st.session_state.input_df.columns.get_loc(k)] = v
 
@@ -83,7 +85,7 @@ if csv_input_file:
         df_csv.columns = df_csv.columns.str.strip()
         df_csv = df_csv.set_index("Sales Name")
         st.session_state.input_df.update(df_csv)
-        st.sidebar.success("✅ Đã khớp dữ liệu từ CSV!")
+        st.sidebar.success("✅ Đã nạp dữ liệu từ CSV!")
     except Exception as e:
         st.sidebar.error(f"Lỗi file CSV: {e}")
 
@@ -109,38 +111,31 @@ if uploaded_file:
     st.subheader("📝 1. BẢNG NHẬP DOANH SỐ & ĐIỀU CHỈNH")
     c1, c2, c3 = st.columns([1, 2, 1])
     with c2:
-        st.data_editor(current_input_display, use_container_width=True, key="editor_v78", on_change=update_input, height=((len(active_staff)*35)+40))
+        st.data_editor(current_input_display, use_container_width=True, key="editor_v81", on_change=update_input, height=((len(active_staff)*35)+40))
     
-    # FIX LỖI Ở ĐÂY: Reset index ngay lập tức để 'Sales Name' trở thành một cột
     final_df = pd.concat([current_input_display, stats], axis=1).fillna(0).reset_index()
-    # Đảm bảo cột có tên là 'Sales Name'
     final_df.rename(columns={'index': 'Sales Name'}, inplace=True)
 
     # --- 6. TÍNH TOÁN ---
     def calculate_metrics(row):
-        # Lấy tên nhân viên
         name = row['Sales Name']
         lvl = STAFF_CONFIG.get(name, "Probation")
         target_orig = LEVEL_TARGETS.get(lvl, 10800) 
         actual = row['Actual_Sec']
-        
         if row['Xin OFF']: return pd.Series([lvl, target_orig, actual, 0, 0.0, "OFF"])
-        
         sales = row['Chốt $']
         bonus = 1800 if 300 <= sales < 500 else (2700 if 500 <= sales < 1000 else (5400 if 1000 <= sales < 2000 else 0))
         is_done = sales >= 2000
-        
         total_red = (target_orig if is_done else (bonus + row['Giảm số P'] * 60))
         target_final = max(0, target_orig - total_red)
         pct = 100.0 if (is_done or target_final <= 0) else (actual / target_final * 100)
         return pd.Series([lvl, target_final, actual, total_red, round(float(pct), 1), "GOOD JOB" if pct >= 100.0 or is_done else "Come on!"])
 
     final_df[['🏅 LVL', 'target_val', 'actual_val', 'red_val', 'pct_val', '📊 RESULT']] = final_df.apply(calculate_metrics, axis=1)
-    # Reset index một lần nữa sau khi Sort để style đổ màu không bị lệch
     final_df = final_df.sort_values(by='pct_val', ascending=False).reset_index(drop=True)
 
-    # --- 7. UI HEADER & METRICS ---
-    st.markdown(f'<div class="main-header">🏆 WORKING RESULTS STATISTICS | {static_time}</div>', unsafe_allow_html=True)
+    # --- 7. UI HEADER HIỂN THỊ GIỜ MỸ ---
+    st.markdown(f'<div class="main-header">🏆 WORKING RESULTS STATISTICS | {static_time} (EST)</div>', unsafe_allow_html=True)
     
     t_p, t_t, t_c = int(final_df['Chốt $'].sum()), format_time(final_df['Actual_Sec'].sum()), int(final_df['Tong_Cuoc_Goi'].sum())
     st.markdown(f"""<div class="metric-container">
@@ -151,21 +146,16 @@ if uploaded_file:
 
     # --- 8. BẢNG HIỂN THỊ ---
     disp_df = pd.DataFrame()
-    disp_df['👤 SALES'] = final_df['Sales Name']
-    disp_df['🏅 LVL'] = final_df['🏅 LVL']
-    disp_df['💵 CHỐT $'] = final_df['Chốt $']
-    disp_df['🎯 GOAL'] = final_df['target_val'].apply(format_time)
+    disp_df['👤 SALES'] = final_df['Sales Name']; disp_df['🏅 LVL'] = final_df['🏅 LVL']
+    disp_df['💵 CHỐT $'] = final_df['Chốt $']; disp_df['🎯 GOAL'] = final_df['target_val'].apply(format_time)
     disp_df['⏱️ CALL'] = final_df['actual_val'].apply(format_time)
     disp_df['📉 GIẢM TALKTIME'] = final_df['red_val'].apply(lambda x: "🏆 DONE" if x >= 9000 else f"{int(x//60)}p")
     disp_df['% HOÀN THÀNH'] = final_df['pct_val']
-    disp_df['🔥 5P'] = final_df['Int_5p'].astype(int)
-    disp_df['🔥 10P'] = final_df['Int_10p'].astype(int)
-    disp_df['🔥 30P'] = final_df['Int_30p'].astype(int)
-    disp_df['📊 RESULT'] = final_df['📊 RESULT']
+    disp_df['🔥 5P'] = final_df['Int_5p'].astype(int); disp_df['🔥 10P'] = final_df['Int_10p'].astype(int)
+    disp_df['🔥 30P'] = final_df['Int_30p'].astype(int); disp_df['📊 RESULT'] = final_df['📊 RESULT']
 
     def apply_row_styles(row):
-        styles = [''] * len(row)
-        idx = row.name 
+        styles = [''] * len(row); idx = row.name 
         r = final_df.iloc[idx]
         if r['🏅 LVL'] in LEVEL_COLORS: styles[1] = f'background-color: {LEVEL_COLORS[r["🏅 LVL"]]};'
         if r['Chốt $'] > 0: styles[2] = 'background-color: #fee2e2; color: #b91c1c; font-weight: 800;'
@@ -180,11 +170,10 @@ if uploaded_file:
     st.dataframe(disp_df.style.apply(apply_row_styles, axis=1), use_container_width=True, hide_index=True, height=(len(active_staff)*35+50),
         column_config={"💵 CHỐT $": st.column_config.NumberColumn(format="$%d"), "% HOÀN THÀNH": st.column_config.NumberColumn(format="%.1f%%")})
 
-    # --- 9. BIỂU ĐỒ ---
-    fig = px.bar(final_df[final_df['📊 RESULT'] != "OFF"], x='Sales Name', y='pct_val', color='pct_val', color_continuous_scale='Blues', text_auto='.1f', height=350, title="📊 BẢNG XẾP HẠNG HIỆU SUẤT (%)")
+    fig = px.bar(final_df[final_df['📊 RESULT'] != "OFF"], x='Sales Name', y='pct_val', color='pct_val', color_continuous_scale='Blues', text_auto='.1f', height=350)
     fig.update_layout(xaxis={'categoryorder':'total descending'})
     st.plotly_chart(fig, use_container_width=True)
     
     st.sidebar.download_button("📥 Export CSV", disp_df.to_csv(index=False).encode('utf-8-sig'), f"Report_{file_date}.csv")
 else:
-    st.info("👋 Chào Team Henry! Hãy tải file RingCentral và file Sales nhé.")
+    st.info("👋 Chào Team Henry! Hãy tải file RingCentral nhé.")
