@@ -6,9 +6,9 @@ from datetime import datetime
 # --- 1. CẤU HÌNH TRANG & UI LUXURY ---
 st.set_page_config(page_title="Dream Talent - Henry Master Hub", layout="wide")
 
+# Lấy thời gian tĩnh
 now = datetime.now()
-# Đổi định dạng sang Tháng/Ngày/Năm (MM/DD/YYYY)
-real_time_date = now.strftime("%a %m/%d/%Y") 
+static_time = now.strftime("%m/%d/%Y | %H:%M")
 file_date = now.strftime("%m-%d-%Y")
 
 st.markdown("""
@@ -33,7 +33,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. DATABASE CỐ ĐỊNH ---
+# --- 2. DATABASE ---
 STAFF_CONFIG = {
     "Andres Nguyen": "GOLD", "Charlie Nguyen": "GOLD", "Amy Tran": "GOLD",
     "Alan Nguyen": "GOLD", "Rio Le": "GOLD", "Thierry Phung": "SILVER",
@@ -67,8 +67,8 @@ if 'input_df' not in st.session_state:
     }).set_index("Sales Name")
 
 def update_input():
-    if "editor_v75" in st.session_state:
-        for row_idx, changes in st.session_state["editor_v75"]["edited_rows"].items():
+    if "editor_v78" in st.session_state:
+        for row_idx, changes in st.session_state["editor_v78"]["edited_rows"].items():
             for k, v in changes.items():
                 st.session_state.input_df.iloc[row_idx, st.session_state.input_df.columns.get_loc(k)] = v
 
@@ -102,7 +102,6 @@ if uploaded_file:
         Int_10p=('Sec', lambda x: (x >= 600).sum()), 
         Int_30p=('Sec', lambda x: (x >= 1800).sum())
     ).reindex(active_staff).fillna(0)
-    stats.index.name = "Sales Name"
 
     current_input_display = st.session_state.input_df.loc[active_staff]
 
@@ -110,13 +109,18 @@ if uploaded_file:
     st.subheader("📝 1. BẢNG NHẬP DOANH SỐ & ĐIỀU CHỈNH")
     c1, c2, c3 = st.columns([1, 2, 1])
     with c2:
-        st.data_editor(current_input_display, use_container_width=True, key="editor_v75", on_change=update_input, height=((len(active_staff)*35)+40))
+        st.data_editor(current_input_display, use_container_width=True, key="editor_v78", on_change=update_input, height=((len(active_staff)*35)+40))
     
+    # FIX LỖI Ở ĐÂY: Reset index ngay lập tức để 'Sales Name' trở thành một cột
     final_df = pd.concat([current_input_display, stats], axis=1).fillna(0).reset_index()
+    # Đảm bảo cột có tên là 'Sales Name'
+    final_df.rename(columns={'index': 'Sales Name'}, inplace=True)
 
     # --- 6. TÍNH TOÁN ---
     def calculate_metrics(row):
-        name = row['Sales Name']; lvl = STAFF_CONFIG.get(name, "Probation")
+        # Lấy tên nhân viên
+        name = row['Sales Name']
+        lvl = STAFF_CONFIG.get(name, "Probation")
         target_orig = LEVEL_TARGETS.get(lvl, 10800) 
         actual = row['Actual_Sec']
         
@@ -132,11 +136,12 @@ if uploaded_file:
         return pd.Series([lvl, target_final, actual, total_red, round(float(pct), 1), "GOOD JOB" if pct >= 100.0 or is_done else "Come on!"])
 
     final_df[['🏅 LVL', 'target_val', 'actual_val', 'red_val', 'pct_val', '📊 RESULT']] = final_df.apply(calculate_metrics, axis=1)
+    # Reset index một lần nữa sau khi Sort để style đổ màu không bị lệch
     final_df = final_df.sort_values(by='pct_val', ascending=False).reset_index(drop=True)
 
     # --- 7. UI HEADER & METRICS ---
-    # Header hiển thị định dạng Tháng/Ngày/Năm
-    st.markdown(f'<div class="main-header">🏆 WORKING RESULTS STATISTICS | {real_time_date}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="main-header">🏆 WORKING RESULTS STATISTICS | {static_time}</div>', unsafe_allow_html=True)
+    
     t_p, t_t, t_c = int(final_df['Chốt $'].sum()), format_time(final_df['Actual_Sec'].sum()), int(final_df['Tong_Cuoc_Goi'].sum())
     st.markdown(f"""<div class="metric-container">
         <div class="metric-box"><div class="metric-title">💰 Total Premium</div><div class="metric-value">${t_p:,}</div></div>
@@ -180,7 +185,6 @@ if uploaded_file:
     fig.update_layout(xaxis={'categoryorder':'total descending'})
     st.plotly_chart(fig, use_container_width=True)
     
-    # Export file cũng dùng định dạng Tháng-Ngày-Năm
     st.sidebar.download_button("📥 Export CSV", disp_df.to_csv(index=False).encode('utf-8-sig'), f"Report_{file_date}.csv")
 else:
-    st.info("👋 Chào Team Henry! Hãy tải file RingCentral và file CSV Sales nhé.")
+    st.info("👋 Chào Team Henry! Hãy tải file RingCentral và file Sales nhé.")
