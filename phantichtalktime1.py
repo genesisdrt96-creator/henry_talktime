@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
-import pytz  # Thư viện xử lý múi giờ
+import pytz
 
 # --- 1. CẤU HÌNH TRANG & UI LUXURY ---
 st.set_page_config(page_title="Dream Talent - Henry Master Hub", layout="wide")
@@ -69,8 +69,8 @@ if 'input_df' not in st.session_state:
     }).set_index("Sales Name")
 
 def update_input():
-    if "editor_v81" in st.session_state:
-        for row_idx, changes in st.session_state["editor_v81"]["edited_rows"].items():
+    if "editor_v82" in st.session_state:
+        for row_idx, changes in st.session_state["editor_v82"]["edited_rows"].items():
             for k, v in changes.items():
                 st.session_state.input_df.iloc[row_idx, st.session_state.input_df.columns.get_loc(k)] = v
 
@@ -92,6 +92,13 @@ if csv_input_file:
 if uploaded_file:
     df_raw = pd.read_csv(uploaded_file)
     df_raw.columns = df_raw.columns.str.strip()
+    
+    # --- BƯỚC LỌC: CHỈ GIỮ LẠI OUTGOING ---
+    if 'Direction' in df_raw.columns:
+        df_raw = df_raw[df_raw['Direction'].str.strip() == 'Outgoing']
+    else:
+        st.warning("⚠️ Không tìm thấy cột 'Direction'. Vui lòng kiểm tra lại định dạng file.")
+
     df_raw['Ext_Name'] = df_raw['Extension'].str.split(' - ', n=1).str[1].fillna("Unknown")
     df_raw['Sec'] = df_raw['Duration'].apply(to_seconds)
     
@@ -111,37 +118,30 @@ if uploaded_file:
     st.subheader("📝 1. BẢNG NHẬP DOANH SỐ & ĐIỀU CHỈNH")
     c1, c2, c3 = st.columns([1, 2, 1])
     with c2:
-        st.data_editor(current_input_display, use_container_width=True, key="editor_v81", on_change=update_input, height=((len(active_staff)*35)+40))
+        st.data_editor(current_input_display, use_container_width=True, key="editor_v82", on_change=update_input, height=((len(active_staff)*35)+40))
     
     final_df = pd.concat([current_input_display, stats], axis=1).fillna(0).reset_index()
     final_df.rename(columns={'index': 'Sales Name'}, inplace=True)
 
     # --- 6. TÍNH TOÁN ---
     def calculate_metrics(row):
-        name = row['Sales Name']
-        lvl = STAFF_CONFIG.get(name, "Probation")
-        target_orig = LEVEL_TARGETS.get(lvl, 10800) 
-        actual = row['Actual_Sec']
+        name = row['Sales Name']; lvl = STAFF_CONFIG.get(name, "Probation"); target_orig = LEVEL_TARGETS.get(lvl, 10800); actual = row['Actual_Sec']
         if row['Xin OFF']: return pd.Series([lvl, target_orig, actual, 0, 0.0, "OFF"])
-        sales = row['Chốt $']
-        bonus = 1800 if 300 <= sales < 500 else (2700 if 500 <= sales < 1000 else (5400 if 1000 <= sales < 2000 else 0))
-        is_done = sales >= 2000
-        total_red = (target_orig if is_done else (bonus + row['Giảm số P'] * 60))
-        target_final = max(0, target_orig - total_red)
-        pct = 100.0 if (is_done or target_final <= 0) else (actual / target_final * 100)
+        sales = row['Chốt $']; bonus = 1800 if 300 <= sales < 500 else (2700 if 500 <= sales < 1000 else (5400 if 1000 <= sales < 2000 else 0))
+        is_done = sales >= 2000; total_red = (target_orig if is_done else (bonus + row['Giảm số P'] * 60))
+        target_final = max(0, target_orig - total_red); pct = 100.0 if (is_done or target_final <= 0) else (actual / target_final * 100)
         return pd.Series([lvl, target_final, actual, total_red, round(float(pct), 1), "GOOD JOB" if pct >= 100.0 or is_done else "Come on!"])
 
     final_df[['🏅 LVL', 'target_val', 'actual_val', 'red_val', 'pct_val', '📊 RESULT']] = final_df.apply(calculate_metrics, axis=1)
     final_df = final_df.sort_values(by='pct_val', ascending=False).reset_index(drop=True)
 
-    # --- 7. UI HEADER HIỂN THỊ GIỜ MỸ ---
+    # --- 7. UI HEADER ---
     st.markdown(f'<div class="main-header">🏆 WORKING RESULTS STATISTICS | {static_time} (EST)</div>', unsafe_allow_html=True)
-    
     t_p, t_t, t_c = int(final_df['Chốt $'].sum()), format_time(final_df['Actual_Sec'].sum()), int(final_df['Tong_Cuoc_Goi'].sum())
     st.markdown(f"""<div class="metric-container">
         <div class="metric-box"><div class="metric-title">💰 Total Premium</div><div class="metric-value">${t_p:,}</div></div>
         <div class="metric-box"><div class="metric-title">⏱️ Total Talktime</div><div class="metric-value">{t_t}</div></div>
-        <div class="metric-box"><div class="metric-title">📞 Total Calls</div><div class="metric-value">{t_c:,}</div></div>
+        <div class="metric-box"><div class="metric-title">📞 Total Outgoing Calls</div><div class="metric-value">{t_c:,}</div></div>
     </div>""", unsafe_allow_html=True)
 
     # --- 8. BẢNG HIỂN THỊ ---
@@ -155,8 +155,7 @@ if uploaded_file:
     disp_df['🔥 30P'] = final_df['Int_30p'].astype(int); disp_df['📊 RESULT'] = final_df['📊 RESULT']
 
     def apply_row_styles(row):
-        styles = [''] * len(row); idx = row.name 
-        r = final_df.iloc[idx]
+        styles = [''] * len(row); idx = row.name; r = final_df.iloc[idx]
         if r['🏅 LVL'] in LEVEL_COLORS: styles[1] = f'background-color: {LEVEL_COLORS[r["🏅 LVL"]]};'
         if r['Chốt $'] > 0: styles[2] = 'background-color: #fee2e2; color: #b91c1c; font-weight: 800;'
         if r['actual_val'] >= r['target_val'] and r['target_val'] > 0:
