@@ -35,14 +35,26 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. DATABASE ---
+# --- 2. DATABASE (ĐÃ CẬP NHẬT THEO YÊU CẦU CỦA HENRY) ---
 STAFF_CONFIG = {
-    "Andres Nguyen": "GOLD", "Charlie Nguyen": "GOLD", "Amy Tran": "GOLD",
-    "Alan Nguyen": "GOLD", "Rio Le": "GOLD", "Thierry Phung": "SILVER",
-    "Ivan Huynh": "SILVER", "David Vo": "SILVER", "Kathy Bui": "BRONZE",
-    "Jayce Mai": "BRONZE", "Jolie Nguyen": "BRONZE", "William Nguyen": "SILVER",
-    "Polo Nguyen": "Associated", "Louisa Ngo": "Associated", "Winnie Pham": "Probation",
-    "Avis Nguyen": "Probation", "Phoenix Nguyen": "Probation", "Ginny Nguyen": "Probation"
+    "Andres Nguyen": "GOLD", 
+    "Charlie Nguyen": "GOLD", 
+    "Alan Nguyen": "GOLD", 
+    "Rio Le": "GOLD", 
+    "Amy Tran": "SILVER",
+    "William Nguyen": "SILVER",
+    "Thierry Phung": "BRONZE",
+    "David Vo": "BRONZE", 
+    "Kathy Bui": "BRONZE",
+    "Ivan Huynh": "Associated", 
+    "Jayce Mai": "Associated", 
+    "Jolie Nguyen": "Associated", 
+    "Louisa Ngo": "Associated",
+    "Avis Nguyen": "Associated",
+    "Amber Dao": "Probation",
+    "Adrian Tran": "Probation", 
+    "Ginny Ly": "Probation",
+    "Keria Nguyen": "Probation"
 }
 STAFF_LIST = list(STAFF_CONFIG.keys())
 LEVEL_TARGETS = {"GOLD": 9000, "SILVER": 9000, "BRONZE": 9000, "Associated": 9000, "Probation": 10800}
