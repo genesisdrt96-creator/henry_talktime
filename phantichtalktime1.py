@@ -35,9 +35,9 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. DATABASE (ĐÃ CẬP NHẬT THEO YÊU CẦU CỦA HENRY) ---
+# --- 2. DATABASE ---
 STAFF_CONFIG = {
-   "Andres Nguyen": "GOLD", 
+    "Andres Nguyen": "GOLD", 
     "Charlie Nguyen": "GOLD", 
     "Alan Nguyen": "GOLD", 
     "Rio Le": "GOLD", 
@@ -111,7 +111,7 @@ if uploaded_file:
     df_raw = pd.read_csv(uploaded_file)
     df_raw.columns = df_raw.columns.str.strip()
     
-    # --- BƯỚC LỌC: CHỈ GIỮ LẠI OUTGOING ---
+    # --- BƯỚC LỌC 1: CHỈ GIỮ LẠI OUTGOING ---
     if 'Direction' in df_raw.columns:
         df_raw = df_raw[df_raw['Direction'].str.strip() == 'Outgoing']
     else:
@@ -119,6 +119,31 @@ if uploaded_file:
 
     df_raw['Ext_Name'] = df_raw['Extension'].str.split(' - ', n=1).str[1].fillna("Unknown")
     df_raw['Sec'] = df_raw['Duration'].apply(to_seconds)
+    
+    # --- BƯỚC LỌC 2: KHỬ TRÙNG LẶP (DOUBLE LINE / AGENT TRANSFER) ---
+    if 'Date' in df_raw.columns and 'Time' in df_raw.columns:
+        df_raw['Start_Time'] = pd.to_datetime(df_raw['Date'].astype(str) + ' ' + df_raw['Time'].astype(str), errors='coerce')
+        
+        # Sắp xếp theo Nhân viên, Thời gian bắt đầu và Thời lượng cuộc gọi (giảm dần)
+        df_raw = df_raw.sort_values(by=['Ext_Name', 'Start_Time', 'Sec'], ascending=[True, True, False])
+        
+        TIME_WINDOW_SEC = 120  # Ngưỡng thời gian trùng line (120 giây)
+        
+        cleaned_rows = []
+        for ext, group in df_raw.groupby('Ext_Name'):
+            last_start = None
+            for idx, row in group.iterrows():
+                current_start = row['Start_Time']
+                if pd.isna(current_start):
+                    cleaned_rows.append(row)
+                    continue
+                
+                # Giữ lại cuộc gọi đầu tiên (có Sec lớn nhất) và bỏ qua các cuộc bắt đầu trong vòng 120s kế tiếp
+                if last_start is None or (current_start - last_start).total_seconds() >= TIME_WINDOW_SEC:
+                    cleaned_rows.append(row)
+                    last_start = current_start
+                    
+        df_raw = pd.DataFrame(cleaned_rows)
     
     active_in_file = df_raw['Ext_Name'].unique()
     active_staff = [name for name in STAFF_LIST if name in active_in_file]
