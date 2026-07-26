@@ -19,18 +19,35 @@ st.markdown("""
     .main-header {
         background: linear-gradient(135deg, #050E3C 0%, #1e3a8a 100%);
         color: white; padding: 15px; border-radius: 12px;
-        text-align: center; font-weight: 800; font-size: 22px; margin-bottom: 15px;
+        text-align: center; font-weight: 900; font-size: 22px; margin-bottom: 15px;
+        letter-spacing: 0.3px;
     }
     .metric-container { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 15px; }
     .metric-box {
         background-color: white; padding: 5px 10px; border-radius: 10px; flex: 1; text-align: center;
         box-shadow: 0 2px 4px rgba(0,0,0,0.05); border: 1px solid #e2e8f0;
     }
-    .metric-title { color: #000000; font-size: 11px; font-weight: 700; margin-bottom: -2px; text-transform: uppercase; }
-    .metric-value { color: #000000; font-size: 24px; font-weight: 900; line-height: 1.2; }
+    .metric-title { color: #000000; font-size: 12px; font-weight: 900; margin-bottom: -2px; text-transform: uppercase; }
+    .metric-value { color: #000000; font-size: 26px; font-weight: 900; line-height: 1.2; }
     [data-testid="stDataFrame"] td, [data-testid="stDataFrame"] th {
         border: none !important; color: #000000 !important;
-        font-weight: 800 !important; font-size: 14px !important; padding: 10px !important;
+        font-weight: 900 !important; font-size: 14px !important; padding: 10px !important;
+    }
+    /* Tiêu đề điều hướng trong sidebar */
+    .nav-title {
+        color: #050E3C; font-size: 15px; font-weight: 900; text-transform: uppercase;
+        letter-spacing: 0.5px; margin: 4px 0 8px 0; text-align: center;
+    }
+    /* Nút điều hướng trang: to, bo góc, dễ bấm */
+    section[data-testid="stSidebar"] .stButton > button {
+        font-size: 16px !important; font-weight: 900 !important;
+        padding: 14px 10px !important; border-radius: 12px !important;
+        border: 2px solid #050E3C !important; margin-bottom: 6px !important;
+        transition: all 0.15s ease;
+    }
+    section[data-testid="stSidebar"] .stButton > button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 10px rgba(5,14,60,0.25) !important;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -196,11 +213,18 @@ if uploaded_file:
     st.session_state['active_staff'] = active_staff
     current_input_display = st.session_state.input_df.loc[active_staff]
 
-    # --- ĐIỀU HƯỚNG TRANG ---
+    # --- ĐIỀU HƯỚNG TRANG (nút bấm to, dễ nhấn) ---
+    if 'page' not in st.session_state:
+        st.session_state.page = "📊 Báo cáo & Biểu đồ"
     st.sidebar.markdown("---")
-    page = st.sidebar.radio("📄 Chọn trang",
-                            ["📝 Nhập doanh số & Điều chỉnh", "📊 Báo cáo & Biểu đồ"],
-                            index=0)
+    st.sidebar.markdown('<div class="nav-title">📄 Chọn trang</div>', unsafe_allow_html=True)
+    if st.sidebar.button("📝  NHẬP DOANH SỐ", use_container_width=True,
+                         type=("primary" if st.session_state.page.startswith("📝") else "secondary")):
+        st.session_state.page = "📝 Nhập doanh số & Điều chỉnh"; st.rerun()
+    if st.sidebar.button("📊  BÁO CÁO & BIỂU ĐỒ", use_container_width=True,
+                         type=("primary" if st.session_state.page.startswith("📊") else "secondary")):
+        st.session_state.page = "📊 Báo cáo & Biểu đồ"; st.rerun()
+    page = st.session_state.page
 
     # --- TÍNH TOÁN (chạy chung cho cả 2 trang) ---
     final_df = pd.concat([current_input_display, stats], axis=1).fillna(0).reset_index()
@@ -258,23 +282,46 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
     disp_df['🔥 5P'] = final_df['Int_5p'].astype(int); disp_df['🔥 10P'] = final_df['Int_10p'].astype(int)
     disp_df['🔥 30P'] = final_df['Int_30p'].astype(int); disp_df['📊 RESULT'] = final_df['📊 RESULT']
 
+    # --- HÀNG TỔNG ---
+    valid = final_df[~final_df['📊 RESULT'].isin(["OFF", "NO DATA"])]
+    tot_target = valid['target_val'].sum()
+    tot_actual = valid['actual_val'].sum()
+    tot_pct = round(tot_actual / tot_target * 100, 1) if tot_target > 0 else 0.0
+    total_row = {
+        '👤 SALES': '🔷 TOTAL', '🏅 LVL': '',
+        '💵 CHỐT $': float(final_df['Chốt $'].sum()),
+        '🎯 GOAL': format_time(tot_target),
+        '⏱️ CALL': format_time(final_df['actual_val'].sum()),
+        '📉 GIẢM TALKTIME': '',
+        '% HOÀN THÀNH': tot_pct,
+        '🔥 5P': int(final_df['Int_5p'].sum()),
+        '🔥 10P': int(final_df['Int_10p'].sum()),
+        '🔥 30P': int(final_df['Int_30p'].sum()),
+        '📊 RESULT': '',
+    }
+    disp_df = pd.concat([disp_df, pd.DataFrame([total_row])], ignore_index=True)
+
     def apply_row_styles(row):
-        styles = [''] * len(row); idx = row.name; r = final_df.iloc[idx]
+        styles = [''] * len(row); idx = row.name
+        # Hàng TỔNG (dòng cuối, không có trong final_df) -> nền navy, chữ trắng đậm
+        if idx >= len(final_df):
+            return ['background-color: #050E3C; color: #ffffff; font-weight: 900; font-size: 15px;'] * len(row)
+        r = final_df.iloc[idx]
         res = r['📊 RESULT']
         if res == "NO DATA":
             # cả dòng xám nhạt, chữ mờ để dễ nhận ra là không có dữ liệu
-            return ['background-color: #f1f5f9; color: #94a3b8;'] * len(row)
-        if r['🏅 LVL'] in LEVEL_COLORS: styles[1] = f'background-color: {LEVEL_COLORS[r["🏅 LVL"]]};'
-        if r['Chốt $'] > 0: styles[2] = 'background-color: #fee2e2; color: #b91c1c; font-weight: 800;'
+            return ['background-color: #f1f5f9; color: #94a3b8; font-weight: 700;'] * len(row)
+        if r['🏅 LVL'] in LEVEL_COLORS: styles[1] = f'background-color: {LEVEL_COLORS[r["🏅 LVL"]]}; font-weight: 900;'
+        if r['Chốt $'] > 0: styles[2] = 'background-color: #fee2e2; color: #b91c1c; font-weight: 900;'
         if r['actual_val'] >= r['target_val'] and r['target_val'] > 0:
-            styles[4] = 'background-color: #dcfce7; color: #15803d; font-weight: 800;'
-        if r['pct_val'] >= 100: styles[6] = 'background-color: #fee2e2; color: #b91c1c; font-weight: 800;'
-        if res == "GOOD JOB": styles[10] = 'background-color: #dbeafe; color: #1e40af; font-weight: 800;'
-        elif res == "OFF": styles[10] = 'background-color: #f1f5f9; color: #64748b; font-weight: 800;'
-        else: styles[10] = 'background-color: #fee2e2; color: #b91c1c; font-weight: 800;'
+            styles[4] = 'background-color: #dcfce7; color: #15803d; font-weight: 900;'
+        if r['pct_val'] >= 100: styles[6] = 'background-color: #fee2e2; color: #b91c1c; font-weight: 900;'
+        if res == "GOOD JOB": styles[10] = 'background-color: #dbeafe; color: #1e40af; font-weight: 900;'
+        elif res == "OFF": styles[10] = 'background-color: #f1f5f9; color: #64748b; font-weight: 900;'
+        else: styles[10] = 'background-color: #fee2e2; color: #b91c1c; font-weight: 900;'
         return styles
 
-    st.dataframe(disp_df.style.apply(apply_row_styles, axis=1), use_container_width=True, hide_index=True, height=(len(active_staff)*35+50),
+    st.dataframe(disp_df.style.apply(apply_row_styles, axis=1), use_container_width=True, hide_index=True, height=((len(active_staff)+1)*35+50),
         column_config={"💵 CHỐT $": st.column_config.NumberColumn(format="$%d"), "% HOÀN THÀNH": st.column_config.NumberColumn(format="%.1f%%")})
 
     # --- GHI CHÚ: nhân viên không có dữ liệu talktime ---
@@ -306,6 +353,23 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
             margin=dict(t=40, b=0, l=0, r=0), uniformtext_minsize=8, uniformtext_mode='hide',
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
         st.plotly_chart(fig, use_container_width=True)
+
+    # --- 9b. BIỂU ĐỒ ĐƯỜNG: CUỘC GỌI CHẤT LƯỢNG (≥5 PHÚT) ---
+    line_df = final_df[~final_df['📊 RESULT'].isin(["OFF", "NO DATA"])].copy()
+    if len(line_df):
+        tot_5p = int(final_df['Int_5p'].sum())
+        st.markdown(f'<div class="main-header">📈 CUỘC GỌI CHẤT LƯỢNG ≥5 PHÚT | TỔNG: {tot_5p} CUỘC</div>', unsafe_allow_html=True)
+        figl = px.line(line_df, x='Sales Name', y='Int_5p', markers=True, text='Int_5p', height=340)
+        figl.update_traces(line=dict(color='#050E3C', width=3),
+                           marker=dict(size=10, color='#1e3a8a', line=dict(color='white', width=1.5)),
+                           textposition='top center', textfont=dict(size=13, color='#050E3C', family='Arial Black'))
+        figl.update_layout(
+            xaxis={'title': None, 'tickangle': -40},
+            yaxis_title="Số cuộc ≥5 phút", plot_bgcolor='white',
+            margin=dict(t=20, b=0, l=0, r=0),
+            font=dict(size=12, color='#050E3C'))
+        figl.update_yaxes(rangemode='tozero', gridcolor='#e2e8f0')
+        st.plotly_chart(figl, use_container_width=True)
 
     # --- 10. EXPORT ---
     # (a) File hiển thị (như bảng trên)
