@@ -196,16 +196,16 @@ if uploaded_file:
     st.session_state['active_staff'] = active_staff
     current_input_display = st.session_state.input_df.loc[active_staff]
 
-    # --- 5. NHẬP LIỆU ---
-    st.subheader("📝 1. BẢNG NHẬP DOANH SỐ & ĐIỀU CHỈNH")
-    c1, c2, c3 = st.columns([1, 2, 1])
-    with c2:
-        st.data_editor(current_input_display, use_container_width=True, key="editor_v82", on_change=update_input, height=((len(active_staff)*35)+40))
-    
+    # --- ĐIỀU HƯỚNG TRANG ---
+    st.sidebar.markdown("---")
+    page = st.sidebar.radio("📄 Chọn trang",
+                            ["📝 Nhập doanh số & Điều chỉnh", "📊 Báo cáo & Biểu đồ"],
+                            index=0)
+
+    # --- TÍNH TOÁN (chạy chung cho cả 2 trang) ---
     final_df = pd.concat([current_input_display, stats], axis=1).fillna(0).reset_index()
     final_df.rename(columns={'index': 'Sales Name'}, inplace=True)
 
-    # --- 6. TÍNH TOÁN ---
     def calculate_metrics(row):
         name = row['Sales Name']; lvl = STAFF_CONFIG.get(name, "Probation"); target_orig = LEVEL_TARGETS.get(lvl, 9000); actual = row['Actual_Sec']
         if row['Xin OFF']: return pd.Series([lvl, target_orig, actual, 0, 0.0, "OFF"])
@@ -222,7 +222,17 @@ if uploaded_file:
     # GIỮ THỨ TỰ CỐ ĐỊNH theo STAFF_LIST (không sort theo hiệu suất)
     final_df = final_df.reset_index(drop=True)
 
-    # --- 7. UI HEADER ---
+# ==================== TRANG 1: NHẬP LIỆU ====================
+if uploaded_file and page == "📝 Nhập doanh số & Điều chỉnh":
+    st.subheader("📝 BẢNG NHẬP DOANH SỐ & ĐIỀU CHỈNH")
+    st.caption("Nhập xong, chuyển sang trang **📊 Báo cáo & Biểu đồ** ở thanh bên để xem kết quả.")
+    c1, c2, c3 = st.columns([1, 2, 1])
+    with c2:
+        st.data_editor(current_input_display, use_container_width=True, key="editor_v82",
+                       on_change=update_input, height=((len(active_staff)*35)+40))
+
+# ==================== TRANG 2: BÁO CÁO ====================
+if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
     st.markdown(f'<div class="main-header">🏆 WORKING RESULTS STATISTICS | {static_time} (EST)</div>', unsafe_allow_html=True)
     t_p, t_t, t_c = int(final_df['Chốt $'].sum()), format_time(final_df['Actual_Sec'].sum()), int(final_df['Tong_Cuoc_Goi'].sum())
     st.markdown(f"""<div class="metric-container">
@@ -308,5 +318,7 @@ if uploaded_file:
     st.sidebar.download_button("📦 Export snapshot (gộp tuần/tháng)",
                                snapshot.to_csv(index=False).encode('utf-8-sig'),
                                f"Snapshot_{file_date}.csv")
-else:
-    st.info("👋 Chào Team Henry! Hãy tải file RingCentral nhé.")
+
+# ==================== CHƯA CÓ FILE ====================
+if not uploaded_file:
+    st.info("👋 Chào Team Henry! Hãy tải file RingCentral ở thanh bên để bắt đầu.")
