@@ -149,9 +149,6 @@ if uploaded_file:
     df_raw = df_raw.dropna(subset=['Start'])
     df_raw['End'] = df_raw['Start'] + pd.to_timedelta(df_raw['Sec'], unit='s')
 
-    active_in_file = df_raw['Ext_Name'].unique()
-    active_staff = [name for name in STAFF_LIST if name in active_in_file]
-
     # --- MERGE INTERVAL: talktime = UNION các khoảng (wall-clock), số cuộc = số phiên ---
     # Các leg VoIP chồng lấn thời gian của cùng một cuộc bị transfer lòng vòng
     # sẽ được gộp thành 1 phiên; talktime tính theo thời gian đường dây thực bận
@@ -180,6 +177,13 @@ if uploaded_file:
             'Int_30p': int((ss >= 1800).sum()),
         })
 
+    # BÁO CÁO TẤT CẢ nhân viên theo đúng thứ tự STAFF_LIST (không lọc bỏ ai).
+    # Người không xuất hiện trong file RingCentral -> nhóm "không có data" (ghi chú).
+    active_in_file = df_raw['Ext_Name'].unique()
+    active_staff = list(STAFF_LIST)                       # thứ tự report cố định
+    no_data_staff = [n for n in active_staff if n not in active_in_file]
+    NO_DATA_SET = set(no_data_staff)
+
     df_active = df_raw[df_raw['Ext_Name'].isin(active_staff)]
     if len(df_active):
         stats = df_active.groupby('Ext_Name').apply(_merge_sessions).reindex(active_staff).fillna(0)
@@ -203,15 +207,20 @@ if uploaded_file:
 
     # --- 6. TÍNH TOÁN ---
     def calculate_metrics(row):
-        name = row['Sales Name']; lvl = STAFF_CONFIG.get(name, "Probation"); target_orig = LEVEL_TARGETS.get(lvl, 10800); actual = row['Actual_Sec']
+        name = row['Sales Name']; lvl = STAFF_CONFIG.get(name, "Probation"); target_orig = LEVEL_TARGETS.get(lvl, 9000); actual = row['Actual_Sec']
         if row['Xin OFF']: return pd.Series([lvl, target_orig, actual, 0, 0.0, "OFF"])
-        sales = row['Chốt $']; bonus = 1800 if 300 <= sales < 500 else (2700 if 500 <= sales < 1000 else (5400 if 1000 <= sales < 2000 else 0))
+        sales = row['Chốt $']
+        # Không có mặt trong file RingCentral và cũng chưa chốt $ -> đánh dấu NO DATA (đưa vào ghi chú)
+        if name in NO_DATA_SET and sales == 0:
+            return pd.Series([lvl, target_orig, 0, 0, 0.0, "NO DATA"])
+        bonus = 1800 if 300 <= sales < 500 else (2700 if 500 <= sales < 1000 else (5400 if 1000 <= sales < 2000 else 0))
         is_done = sales >= 2000; total_red = (target_orig if is_done else (bonus + row['Giảm số P'] * 60))
         target_final = max(0, target_orig - total_red); pct = 100.0 if (is_done or target_final <= 0) else (actual / target_final * 100)
         return pd.Series([lvl, target_final, actual, total_red, round(float(pct), 1), "GOOD JOB" if pct >= 100.0 or is_done else "Come on!"])
 
     final_df[['🏅 LVL', 'target_val', 'actual_val', 'red_val', 'pct_val', '📊 RESULT']] = final_df.apply(calculate_metrics, axis=1)
-    final_df = final_df.sort_values(by='pct_val', ascending=False).reset_index(drop=True)
+    # GIỮ THỨ TỰ CỐ ĐỊNH theo STAFF_LIST (không sort theo hiệu suất)
+    final_df = final_df.reset_index(drop=True)
 
     # --- 7. UI HEADER ---
     st.markdown(f'<div class="main-header">🏆 WORKING RESULTS STATISTICS | {static_time} (EST)</div>', unsafe_allow_html=True)
@@ -225,32 +234,79 @@ if uploaded_file:
     # --- 8. BẢNG HIỂN THỊ ---
     disp_df = pd.DataFrame()
     disp_df['👤 SALES'] = final_df['Sales Name']; disp_df['🏅 LVL'] = final_df['🏅 LVL']
-    disp_df['💵 CHỐT $'] = final_df['Chốt $']; disp_df['🎯 GOAL'] = final_df['target_val'].apply(format_time)
-    disp_df['⏱️ CALL'] = final_df['actual_val'].apply(format_time)
-    disp_df['📉 GIẢM TALKTIME'] = final_df['red_val'].apply(lambda x: "🏆 DONE" if x >= 9000 else f"{int(x//60)}p")
+    disp_df['💵 CHỐT $'] = final_df['Chốt $']
+
+    def _fmt_goal(r):
+        return "—" if r['📊 RESULT'] == "NO DATA" else format_time(r['target_val'])
+    def _fmt_call(r):
+        return "—" if r['📊 RESULT'] == "NO DATA" else format_time(r['actual_val'])
+    disp_df['🎯 GOAL'] = final_df.apply(_fmt_goal, axis=1)
+    disp_df['⏱️ CALL'] = final_df.apply(_fmt_call, axis=1)
+    disp_df['📉 GIẢM TALKTIME'] = final_df.apply(
+        lambda r: "—" if r['📊 RESULT'] == "NO DATA" else ("🏆 DONE" if r['red_val'] >= 9000 else f"{int(r['red_val']//60)}p"), axis=1)
     disp_df['% HOÀN THÀNH'] = final_df['pct_val']
     disp_df['🔥 5P'] = final_df['Int_5p'].astype(int); disp_df['🔥 10P'] = final_df['Int_10p'].astype(int)
     disp_df['🔥 30P'] = final_df['Int_30p'].astype(int); disp_df['📊 RESULT'] = final_df['📊 RESULT']
 
     def apply_row_styles(row):
         styles = [''] * len(row); idx = row.name; r = final_df.iloc[idx]
+        res = r['📊 RESULT']
+        if res == "NO DATA":
+            # cả dòng xám nhạt, chữ mờ để dễ nhận ra là không có dữ liệu
+            return ['background-color: #f1f5f9; color: #94a3b8;'] * len(row)
         if r['🏅 LVL'] in LEVEL_COLORS: styles[1] = f'background-color: {LEVEL_COLORS[r["🏅 LVL"]]};'
         if r['Chốt $'] > 0: styles[2] = 'background-color: #fee2e2; color: #b91c1c; font-weight: 800;'
         if r['actual_val'] >= r['target_val'] and r['target_val'] > 0:
             styles[4] = 'background-color: #dcfce7; color: #15803d; font-weight: 800;'
         if r['pct_val'] >= 100: styles[6] = 'background-color: #fee2e2; color: #b91c1c; font-weight: 800;'
-        res = r['📊 RESULT']
         if res == "GOOD JOB": styles[10] = 'background-color: #dbeafe; color: #1e40af; font-weight: 800;'
-        elif res != "OFF": styles[10] = 'background-color: #fee2e2; color: #b91c1c; font-weight: 800;'
+        elif res == "OFF": styles[10] = 'background-color: #f1f5f9; color: #64748b; font-weight: 800;'
+        else: styles[10] = 'background-color: #fee2e2; color: #b91c1c; font-weight: 800;'
         return styles
 
     st.dataframe(disp_df.style.apply(apply_row_styles, axis=1), use_container_width=True, hide_index=True, height=(len(active_staff)*35+50),
         column_config={"💵 CHỐT $": st.column_config.NumberColumn(format="$%d"), "% HOÀN THÀNH": st.column_config.NumberColumn(format="%.1f%%")})
 
-    fig = px.bar(final_df[final_df['📊 RESULT'] != "OFF"], x='Sales Name', y='pct_val', color='pct_val', color_continuous_scale='Blues', text_auto='.1f', height=350)
-    fig.update_layout(xaxis={'categoryorder':'total descending'})
-    st.plotly_chart(fig, use_container_width=True)
-    
-    st.sidebar.download_button("📥 Export CSV", disp_df.to_csv(index=False).encode('utf-8-sig'), f"Report_{file_date}.csv")
+    # --- GHI CHÚ: nhân viên không có dữ liệu talktime ---
+    if no_data_staff:
+        st.warning(f"📝 **Không có dữ liệu talktime ({len(no_data_staff)}):** " + " • ".join(no_data_staff))
+
+    # --- 9. BIỂU ĐỒ (phân nhóm trạng thái + đường mục tiêu 100%) ---
+    chart_df = final_df[~final_df['📊 RESULT'].isin(["OFF", "NO DATA"])].copy()
+    if len(chart_df):
+        def _status(r):
+            if r['pct_val'] >= 100 or r['📊 RESULT'] == "GOOD JOB": return "✅ Đạt (≥100%)"
+            if r['pct_val'] >= 70: return "🟡 Gần đạt (70–99%)"
+            return "🔴 Còn xa (<70%)"
+        chart_df['Trạng thái'] = chart_df.apply(_status, axis=1)
+        color_map = {"✅ Đạt (≥100%)": "#16a34a", "🟡 Gần đạt (70–99%)": "#f59e0b", "🔴 Còn xa (<70%)": "#dc2626"}
+        order = ["✅ Đạt (≥100%)", "🟡 Gần đạt (70–99%)", "🔴 Còn xa (<70%)"]
+        chart_df = chart_df.sort_values('pct_val', ascending=False)
+
+        fig = px.bar(chart_df, x='Sales Name', y='pct_val', color='Trạng thái',
+                     color_discrete_map=color_map, category_orders={'Trạng thái': order},
+                     text='pct_val', height=400,
+                     hover_data={'Chốt $': ':$,.0f', 'pct_val': ':.1f'})
+        fig.update_traces(texttemplate='%{text:.0f}%', textposition='outside', cliponaxis=False)
+        fig.add_hline(y=100, line_dash="dash", line_color="#050E3C",
+                      annotation_text="Mục tiêu 100%", annotation_position="top left")
+        fig.update_layout(
+            xaxis={'categoryorder': 'total descending', 'title': None},
+            yaxis_title="% Hoàn thành", legend_title=None, plot_bgcolor='white',
+            margin=dict(t=40, b=0, l=0, r=0), uniformtext_minsize=8, uniformtext_mode='hide',
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+        st.plotly_chart(fig, use_container_width=True)
+
+    # --- 10. EXPORT ---
+    # (a) File hiển thị (như bảng trên)
+    st.sidebar.download_button("📥 Export bảng (CSV)", disp_df.to_csv(index=False).encode('utf-8-sig'), f"Report_{file_date}.csv")
+    # (b) Snapshot dạng SỐ + có cột Date -> để cộng dồn tuần/tháng sau này
+    snapshot = final_df[['Sales Name', '🏅 LVL', 'Xin OFF', 'Chốt $',
+                         'target_val', 'actual_val', 'red_val', 'pct_val',
+                         'Tong_Cuoc_Goi', 'Int_5p', 'Int_10p', 'Int_30p', '📊 RESULT']].copy()
+    snapshot.insert(0, 'Date', file_date)
+    st.sidebar.download_button("📦 Export snapshot (gộp tuần/tháng)",
+                               snapshot.to_csv(index=False).encode('utf-8-sig'),
+                               f"Snapshot_{file_date}.csv")
 else:
     st.info("👋 Chào Team Henry! Hãy tải file RingCentral nhé.")
