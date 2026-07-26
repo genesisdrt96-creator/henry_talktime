@@ -59,12 +59,14 @@ STAFF_CONFIG = {
     "Niko Nguyen": "Probation",
     "Martin Tran": "Probation",
     "Ray Duong": "Probation",
-    "Marky Huynh": "Probation",
-    "Kony Mai": "Probation"
+    "Marky Huynh": "Probation"
 }
 STAFF_LIST = list(STAFF_CONFIG.keys())
-LEVEL_TARGETS = {"GOLD": 9000, "SILVER": 9000, "BRONZE": 9000, "Associated": 9000, "Probation": 10800}
+LEVEL_TARGETS = {"GOLD": 9000, "SILVER": 9000, "BRONZE": 9000, "Associated": 9000, "Probation": 9000}  # 9000s = 2h30 cho tất cả
 LEVEL_COLORS = {"GOLD": "#FEF3C7", "SILVER": "#F1F5F9", "BRONZE": "#FFEDD5", "Associated": "#DBEAFE", "Probation": "#DCFCE7"}
+
+# Cuộc gọi ngắn hơn ngưỡng này coi là blip nối máy, không tính talktime
+REAL_TALK_MIN_SEC = 20
 
 def to_seconds(s):
     if pd.isna(s) or str(s).lower() == 'in progress' or s == '-': return 0
@@ -87,10 +89,17 @@ if 'input_df' not in st.session_state:
     }).set_index("Sales Name")
 
 def update_input():
+    # Ghi theo TÊN (không theo vị trí) để tránh lệch dòng khi file RingCentral
+    # không đủ 24 người. row_idx là vị trí trong bảng đang hiển thị (active_staff),
+    # nên phải map ngược ra tên trước khi ghi.
     if "editor_v82" in st.session_state:
+        active = st.session_state.get('active_staff', [])
         for row_idx, changes in st.session_state["editor_v82"]["edited_rows"].items():
+            if row_idx >= len(active):
+                continue
+            name = active[row_idx]
             for k, v in changes.items():
-                st.session_state.input_df.iloc[row_idx, st.session_state.input_df.columns.get_loc(k)] = v
+                st.session_state.input_df.loc[name, k] = v
 
 # --- 4. SIDEBAR ---
 st.sidebar.markdown("# 💎 Master Dashboard")
@@ -110,26 +119,77 @@ if csv_input_file:
 if uploaded_file:
     df_raw = pd.read_csv(uploaded_file)
     df_raw.columns = df_raw.columns.str.strip()
-    
-    # --- BƯỚC LỌC: CHỈ GIỮ LẠI OUTGOING ---
+
+    # --- BƯỚC LỌC 1: CHỈ GIỮ OUTGOING ---
     if 'Direction' in df_raw.columns:
-        df_raw = df_raw[df_raw['Direction'].str.strip() == 'Outgoing']
+        df_raw = df_raw[df_raw['Direction'].astype(str).str.strip() == 'Outgoing']
     else:
         st.warning("⚠️ Không tìm thấy cột 'Direction'. Vui lòng kiểm tra lại định dạng file.")
 
+    # --- BƯỚC LỌC 2: CHỈ GIỮ LEG THẬT (Type == 'Voice') ---
+    # Row Transfer để trống cột Type -> tự động bị loại. Đây là bước chống thổi
+    # phồng talktime do các leg Transfer nhân bản nguyên duration.
+    if 'Type' in df_raw.columns:
+        df_raw['Type'] = df_raw['Type'].astype(str).str.strip()
+        df_raw = df_raw[df_raw['Type'].str.lower() == 'voice']
+    else:
+        st.warning("⚠️ Không tìm thấy cột 'Type'. Không thể lọc Transfer — số liệu có thể bị thổi phồng.")
+
     df_raw['Ext_Name'] = df_raw['Extension'].str.split(' - ', n=1).str[1].fillna("Unknown")
     df_raw['Sec'] = df_raw['Duration'].apply(to_seconds)
-    
+
+    # --- BƯỚC LỌC 3: BỎ BLIP NỐI MÁY QUÁ NGẮN ---
+    df_raw = df_raw[df_raw['Sec'] >= REAL_TALK_MIN_SEC]
+
+    # --- DỰNG MỐC THỜI GIAN (Time chỉ có độ phân giải PHÚT) ---
+    df_raw['Start'] = pd.to_datetime(
+        df_raw['Date'].astype(str).str.strip() + ' ' + df_raw['Time'].astype(str).str.strip(),
+        format='%a %m/%d/%Y %I:%M %p', errors='coerce'
+    )
+    df_raw = df_raw.dropna(subset=['Start'])
+    df_raw['End'] = df_raw['Start'] + pd.to_timedelta(df_raw['Sec'], unit='s')
+
     active_in_file = df_raw['Ext_Name'].unique()
     active_staff = [name for name in STAFF_LIST if name in active_in_file]
-    
-    stats = df_raw[df_raw['Ext_Name'].isin(active_staff)].groupby('Ext_Name').agg(
-        Tong_Cuoc_Goi=('Action', 'count'), Actual_Sec=('Sec', 'sum'),
-        Int_5p=('Sec', lambda x: (x >= 300).sum()), 
-        Int_10p=('Sec', lambda x: (x >= 600).sum()), 
-        Int_30p=('Sec', lambda x: (x >= 1800).sum())
-    ).reindex(active_staff).fillna(0)
 
+    # --- MERGE INTERVAL: talktime = UNION các khoảng (wall-clock), số cuộc = số phiên ---
+    # Các leg VoIP chồng lấn thời gian của cùng một cuộc bị transfer lòng vòng
+    # sẽ được gộp thành 1 phiên; talktime tính theo thời gian đường dây thực bận
+    # dưới ext của agent, không cộng dồn từng leg.
+    def _merge_sessions(g):
+        g = g.sort_values('Start')
+        talk, cnt, cs, ce = 0, 0, None, None
+        sess_max = []
+        for s, e, sec in zip(g['Start'], g['End'], g['Sec']):
+            if ce is None or s > ce:            # phiên mới (không chồng)
+                if ce is not None:
+                    talk += (ce - cs).total_seconds()
+                cs, ce, cnt = s, e, cnt + 1
+                sess_max.append(sec)
+            else:                                # chồng lấn -> nới phiên hiện tại
+                ce = max(ce, e)
+                sess_max[-1] = max(sess_max[-1], sec)
+        if ce is not None:
+            talk += (ce - cs).total_seconds()
+        ss = pd.Series(sess_max, dtype=float)
+        return pd.Series({
+            'Actual_Sec': talk,
+            'Tong_Cuoc_Goi': cnt,
+            'Int_5p':  int((ss >= 300).sum()),
+            'Int_10p': int((ss >= 600).sum()),
+            'Int_30p': int((ss >= 1800).sum()),
+        })
+
+    df_active = df_raw[df_raw['Ext_Name'].isin(active_staff)]
+    if len(df_active):
+        stats = df_active.groupby('Ext_Name').apply(_merge_sessions).reindex(active_staff).fillna(0)
+    else:
+        stats = pd.DataFrame(
+            0, index=active_staff,
+            columns=['Actual_Sec', 'Tong_Cuoc_Goi', 'Int_5p', 'Int_10p', 'Int_30p']
+        )
+
+    st.session_state['active_staff'] = active_staff
     current_input_display = st.session_state.input_df.loc[active_staff]
 
     # --- 5. NHẬP LIỆU ---
