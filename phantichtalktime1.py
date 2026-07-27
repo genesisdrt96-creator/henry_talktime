@@ -348,6 +348,20 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
     if no_data_staff:
         st.warning(f"📝 **Không có dữ liệu talktime ({len(no_data_staff)}):** " + " • ".join(no_data_staff))
 
+    # --- COPY CỘT % ĐỂ DÁN SANG GOOGLE SHEET ---
+    with st.expander("📋 Copy cột '% HOÀN THÀNH' để dán sang Google Sheet"):
+        st.caption("Bấm biểu tượng copy ở góc phải ô bên dưới → sang Google Sheet, chọn 1 ô rồi Ctrl+V. "
+                   "Các dòng sẽ tự đổ xuống thành 1 cột, đúng thứ tự như bảng (kèm dòng TOTAL cuối).")
+        pct_with_sign = "\n".join(f"{v:.1f}%" for v in final_df['pct_val']) + f"\n{tot_pct:.1f}%"
+        pct_plain = "\n".join(f"{v:.1f}" for v in final_df['pct_val']) + f"\n{tot_pct:.1f}"
+        cA, cB = st.columns(2)
+        with cA:
+            st.markdown("**Có dấu %** (Sheet hiểu là phần trăm)")
+            st.code(pct_with_sign, language=None)
+        with cB:
+            st.markdown("**Số thường** (không có %, dễ tính toán)")
+            st.code(pct_plain, language=None)
+
     # --- 9. BIỂU ĐỒ (phân nhóm trạng thái + đường mục tiêu 100%) ---
     chart_df = final_df[~final_df['📊 RESULT'].isin(["OFF", "NO DATA"])].copy()
     if len(chart_df):
