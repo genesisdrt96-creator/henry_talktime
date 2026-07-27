@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime
 import pytz
+import os, glob
 
 # --- 1. CẤU HÌNH TRANG & UI LUXURY ---
 st.set_page_config(page_title="Dream Talent - Henry Master Hub", layout="wide")
@@ -29,6 +30,28 @@ st.markdown("""
     }
     .metric-title { color: #000000; font-size: 13px; font-weight: 900; margin-bottom: -2px; text-transform: uppercase; }
     .metric-value { color: #000000; font-size: 28px; font-weight: 900; line-height: 1.2; }
+    /* ===== KPI CARDS (modern, dark) ===== */
+    .kpi-row { display: flex; gap: 14px; margin: 4px 0 18px 0; flex-wrap: wrap; }
+    .kpi-card {
+        flex: 1; min-width: 150px;
+        background: linear-gradient(155deg, #0B1437 0%, #1e3a8a 100%);
+        border-radius: 18px; padding: 16px 18px; color: #fff;
+        box-shadow: 0 10px 24px rgba(11,20,55,0.28);
+        border: 1px solid rgba(255,255,255,0.06);
+        position: relative; overflow: hidden;
+    }
+    .kpi-card::after {
+        content:""; position:absolute; right:-30px; top:-30px;
+        width:110px; height:110px; border-radius:50%;
+        background: rgba(255,255,255,0.05);
+    }
+    .kpi-ico {
+        width:40px; height:40px; border-radius:12px; display:flex;
+        align-items:center; justify-content:center; font-size:20px; margin-bottom:10px;
+    }
+    .kpi-label { font-size:12px; font-weight:800; letter-spacing:.6px; text-transform:uppercase; color:#AEC0E8; }
+    .kpi-value { font-size:30px; font-weight:900; line-height:1.15; margin-top:2px; }
+    .kpi-sub   { font-size:12px; font-weight:700; color:#93C5FD; margin-top:4px; }
     [data-testid="stDataFrame"] td, [data-testid="stDataFrame"] th {
         border: none !important; color: #0f172a !important;
         font-weight: 900 !important; font-size: 16px !important; padding: 11px !important;
@@ -121,18 +144,25 @@ def update_input():
 
 # --- 4. SIDEBAR ---
 st.sidebar.markdown("# 💎 Master Dashboard")
-uploaded_file = st.sidebar.file_uploader("📂 1. Tải file RingCentral", type=["csv"])
-csv_input_file = st.sidebar.file_uploader("📂 2. Tải file Sales (CSV)", type=["csv"])
+uploaded_file = st.sidebar.file_uploader("📂 Tải file RingCentral", type=["csv"])
 
-if csv_input_file:
-    try:
-        df_csv = pd.read_csv(csv_input_file)
-        df_csv.columns = df_csv.columns.str.strip()
-        df_csv = df_csv.set_index("Sales Name")
-        st.session_state.input_df.update(df_csv)
-        st.sidebar.success("✅ Đã nạp dữ liệu từ CSV!")
-    except Exception as e:
-        st.sidebar.error(f"Lỗi file CSV: {e}")
+# Thư mục lưu dữ liệu Final theo ngày (nằm cạnh file .py)
+HISTORY_DIR = "history"
+os.makedirs(HISTORY_DIR, exist_ok=True)
+
+# --- ĐIỀU HƯỚNG TRANG (luôn hiện, nút to dễ bấm) ---
+if 'page' not in st.session_state:
+    st.session_state.page = "📊 Báo cáo & Biểu đồ"
+st.sidebar.markdown("---")
+st.sidebar.markdown('<div class="nav-title">📄 Chọn trang</div>', unsafe_allow_html=True)
+_nav = [("📝 Nhập doanh số & Điều chỉnh", "📝  NHẬP DOANH SỐ"),
+        ("📊 Báo cáo & Biểu đồ", "📊  BÁO CÁO & BIỂU ĐỒ"),
+        ("📅 Lịch sử", "📅  LỊCH SỬ (NGÀY CŨ)")]
+for _val, _label in _nav:
+    if st.sidebar.button(_label, use_container_width=True,
+                         type=("primary" if st.session_state.page == _val else "secondary")):
+        st.session_state.page = _val; st.rerun()
+page = st.session_state.page
 
 if uploaded_file:
     df_raw = pd.read_csv(uploaded_file)
@@ -214,19 +244,6 @@ if uploaded_file:
     st.session_state['active_staff'] = active_staff
     current_input_display = st.session_state.input_df.loc[active_staff]
 
-    # --- ĐIỀU HƯỚNG TRANG (nút bấm to, dễ nhấn) ---
-    if 'page' not in st.session_state:
-        st.session_state.page = "📊 Báo cáo & Biểu đồ"
-    st.sidebar.markdown("---")
-    st.sidebar.markdown('<div class="nav-title">📄 Chọn trang</div>', unsafe_allow_html=True)
-    if st.sidebar.button("📝  NHẬP DOANH SỐ", use_container_width=True,
-                         type=("primary" if st.session_state.page.startswith("📝") else "secondary")):
-        st.session_state.page = "📝 Nhập doanh số & Điều chỉnh"; st.rerun()
-    if st.sidebar.button("📊  BÁO CÁO & BIỂU ĐỒ", use_container_width=True,
-                         type=("primary" if st.session_state.page.startswith("📊") else "secondary")):
-        st.session_state.page = "📊 Báo cáo & Biểu đồ"; st.rerun()
-    page = st.session_state.page
-
     # --- TÍNH TOÁN (chạy chung cho cả 2 trang) ---
     final_df = pd.concat([current_input_display, stats], axis=1).fillna(0).reset_index()
     final_df.rename(columns={'index': 'Sales Name'}, inplace=True)
@@ -244,6 +261,9 @@ if uploaded_file:
         return pd.Series([lvl, target_final, actual, total_red, round(float(pct), 1), "GOOD JOB" if pct >= 100.0 or is_done else "Come on!"])
 
     final_df[['🏅 LVL', 'target_val', 'actual_val', 'red_val', 'pct_val', '📊 RESULT']] = final_df.apply(calculate_metrics, axis=1)
+    # Talktime QUY ĐỔI = talktime thật + phần giờ được cộng bù (hoặc trừ). Done (red>=9000) -> giữ talktime thật.
+    final_df['effective_sec'] = final_df.apply(
+        lambda r: r['actual_val'] if r['red_val'] >= 9000 else r['actual_val'] + r['red_val'], axis=1)
     # GIỮ THỨ TỰ CỐ ĐỊNH theo STAFF_LIST (không sort theo hiệu suất)
     final_df = final_df.reset_index(drop=True)
 
@@ -259,11 +279,24 @@ if uploaded_file and page == "📝 Nhập doanh số & Điều chỉnh":
 # ==================== TRANG 2: BÁO CÁO ====================
 if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
     st.markdown(f'<div class="main-header">🏆 WORKING RESULTS STATISTICS | {static_time} (EST)</div>', unsafe_allow_html=True)
-    t_p, t_t, t_c = int(final_df['Chốt $'].sum()), format_time(final_df['Actual_Sec'].sum()), int(final_df['Tong_Cuoc_Goi'].sum())
-    st.markdown(f"""<div class="metric-container">
-        <div class="metric-box"><div class="metric-title">💰 Total Premium</div><div class="metric-value">${t_p:,}</div></div>
-        <div class="metric-box"><div class="metric-title">⏱️ Total Talktime</div><div class="metric-value">{t_t}</div></div>
-        <div class="metric-box"><div class="metric-title">📞 Total Outgoing Calls</div><div class="metric-value">{t_c:,}</div></div>
+    t_p = int(final_df['Chốt $'].sum())
+    t_t = format_time(final_df['Actual_Sec'].sum())
+    t_c = int(final_df['Tong_Cuoc_Goi'].sum())
+    _valid = final_df[~final_df['📊 RESULT'].isin(["OFF", "NO DATA"])]
+    team_pct = round(_valid['actual_val'].sum() / _valid['target_val'].sum() * 100, 1) if _valid['target_val'].sum() > 0 else 0.0
+    n_done = int((final_df['📊 RESULT'] == "GOOD JOB").sum())
+    n_active = int(len(_valid))
+    st.markdown(f"""<div class="kpi-row">
+        <div class="kpi-card"><div class="kpi-ico" style="background:#F59E0B33;">💰</div>
+            <div class="kpi-label">Total Premium</div><div class="kpi-value">${t_p:,}</div></div>
+        <div class="kpi-card"><div class="kpi-ico" style="background:#38BDF833;">⏱️</div>
+            <div class="kpi-label">Total Talktime</div><div class="kpi-value">{t_t}</div></div>
+        <div class="kpi-card"><div class="kpi-ico" style="background:#818CF833;">📞</div>
+            <div class="kpi-label">Outgoing Calls</div><div class="kpi-value">{t_c:,}</div></div>
+        <div class="kpi-card"><div class="kpi-ico" style="background:#34D39933;">✅</div>
+            <div class="kpi-label">Team hoàn thành</div><div class="kpi-value">{team_pct:.1f}%</div></div>
+        <div class="kpi-card"><div class="kpi-ico" style="background:#FBBF2433;">🏆</div>
+            <div class="kpi-label">Đạt mục tiêu</div><div class="kpi-value">{n_done}<span style="font-size:16px;color:#93C5FD;">/{n_active}</span></div></div>
     </div>""", unsafe_allow_html=True)
 
     # --- 8. BẢNG HIỂN THỊ ---
@@ -275,8 +308,11 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
         return "—" if r['📊 RESULT'] == "NO DATA" else format_time(r['target_val'])
     def _fmt_call(r):
         return "—" if r['📊 RESULT'] == "NO DATA" else format_time(r['actual_val'])
+    def _fmt_eff(r):
+        return "—" if r['📊 RESULT'] == "NO DATA" else format_time(r['effective_sec'])
     disp_df['🎯 GOAL'] = final_df.apply(_fmt_goal, axis=1)
     disp_df['⏱️ CALL'] = final_df.apply(_fmt_call, axis=1)
+    disp_df['🧮 QUY ĐỔI'] = final_df.apply(_fmt_eff, axis=1)          # talktime sau cộng/trừ giờ
     disp_df['📉 GIẢM TALKTIME'] = final_df.apply(
         lambda r: "—" if r['📊 RESULT'] == "NO DATA" else ("🏆 DONE" if r['red_val'] >= 9000 else f"{int(r['red_val']//60)}p"), axis=1)
     disp_df['% HOÀN THÀNH'] = final_df['pct_val']
@@ -293,6 +329,7 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
         '💵 CHỐT $': float(final_df['Chốt $'].sum()),
         '🎯 GOAL': format_time(tot_target),
         '⏱️ CALL': format_time(final_df['actual_val'].sum()),
+        '🧮 QUY ĐỔI': format_time(valid['effective_sec'].sum()),
         '📉 GIẢM TALKTIME': '',
         '% HOÀN THÀNH': tot_pct,
         '🔥 5P': int(final_df['Int_5p'].sum()),
@@ -302,35 +339,32 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
     }
     disp_df = pd.concat([disp_df, pd.DataFrame([total_row])], ignore_index=True)
 
+    # Vị trí cột (0-index): 0 SALES,1 LVL,2 CHỐT,3 GOAL,4 CALL,5 QUYĐỔI,6 GIẢM,7 %,8 5P,9 10P,10 30P,11 RESULT
     def apply_row_styles(row):
         styles = [''] * len(row); idx = row.name
-        # Hàng TỔNG (dòng cuối, không có trong final_df) -> nền navy, chữ trắng đậm
         if idx >= len(final_df):
             return ['background-color: #050E3C; color: #ffffff; font-weight: 900; font-size: 16px;'] * len(row)
         r = final_df.iloc[idx]
         res = r['📊 RESULT']
         if res == "NO DATA":
-            # cả dòng xám nhạt, chữ mờ -> nhận ra ngay là không có dữ liệu
             return ['background-color: #F8FAFC; color: #94A3B8; font-weight: 700;'] * len(row)
         lvl = r['🏅 LVL']
-        # Cột LVL: nền tint theo hạng + chữ cùng tông (đồng bộ, chuyên nghiệp)
         if lvl in LEVEL_COLORS:
             styles[1] = f'background-color: {LEVEL_COLORS[lvl]}; color: {LEVEL_TEXT[lvl]}; font-weight: 900;'
-        # Cột CHỐT $: có doanh số = tin tốt -> tông vàng "premium" (không dùng đỏ)
         if r['Chốt $'] > 0:
             styles[2] = 'background-color: #FEF3C7; color: #92400E; font-weight: 900;'
-        # Cột CALL: đạt/ vượt goal -> xanh lá
         if r['actual_val'] >= r['target_val'] and r['target_val'] > 0:
             styles[4] = 'background-color: #DCFCE7; color: #15803D; font-weight: 900;'
-        # Cột %: xanh nếu đạt, hổ phách nếu gần đạt, đỏ nếu còn xa
+        # Cột QUY ĐỔI: đạt mốc 2h30 (9000s) -> xanh lá
+        if r['effective_sec'] >= 9000 or r['red_val'] >= 9000:
+            styles[5] = 'background-color: #DCFCE7; color: #15803D; font-weight: 900;'
         pct = r['pct_val']
-        if pct >= 100:   styles[6] = 'background-color: #DCFCE7; color: #15803D; font-weight: 900;'
-        elif pct >= 70:  styles[6] = 'background-color: #FEF3C7; color: #B45309; font-weight: 900;'
-        else:            styles[6] = 'background-color: #FEE2E2; color: #B91C1C; font-weight: 900;'
-        # Cột RESULT: badge trạng thái
-        if res == "GOOD JOB": styles[10] = 'background-color: #DCFCE7; color: #166534; font-weight: 900;'
-        elif res == "OFF":    styles[10] = 'background-color: #E2E8F0; color: #475569; font-weight: 900;'
-        else:                 styles[10] = 'background-color: #FEE2E2; color: #B91C1C; font-weight: 900;'
+        if pct >= 100:   styles[7] = 'background-color: #DCFCE7; color: #15803D; font-weight: 900;'
+        elif pct >= 70:  styles[7] = 'background-color: #FEF3C7; color: #B45309; font-weight: 900;'
+        else:            styles[7] = 'background-color: #FEE2E2; color: #B91C1C; font-weight: 900;'
+        if res == "GOOD JOB": styles[11] = 'background-color: #DCFCE7; color: #166534; font-weight: 900;'
+        elif res == "OFF":    styles[11] = 'background-color: #E2E8F0; color: #475569; font-weight: 900;'
+        else:                 styles[11] = 'background-color: #FEE2E2; color: #B91C1C; font-weight: 900;'
         return styles
 
     st.dataframe(disp_df.style.apply(apply_row_styles, axis=1), use_container_width=True, hide_index=True, height=((len(active_staff)+1)*38+50),
@@ -383,18 +417,78 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
         figl.update_yaxes(rangemode='tozero', gridcolor='#e2e8f0')
         st.plotly_chart(figl, use_container_width=True)
 
-    # --- 10. EXPORT ---
-    # (a) File hiển thị (như bảng trên)
-    st.sidebar.download_button("📥 Export bảng (CSV)", disp_df.to_csv(index=False).encode('utf-8-sig'), f"Report_{file_date}.csv")
-    # (b) Snapshot dạng SỐ + có cột Date -> để cộng dồn tuần/tháng sau này
+    # --- 10. SNAPSHOT (dạng số + có cột Date) ---
     snapshot = final_df[['Sales Name', '🏅 LVL', 'Xin OFF', 'Chốt $',
-                         'target_val', 'actual_val', 'red_val', 'pct_val',
+                         'target_val', 'actual_val', 'effective_sec', 'red_val', 'pct_val',
                          'Tong_Cuoc_Goi', 'Int_5p', 'Int_10p', 'Int_30p', '📊 RESULT']].copy()
     snapshot.insert(0, 'Date', file_date)
-    st.sidebar.download_button("📦 Export snapshot (gộp tuần/tháng)",
-                               snapshot.to_csv(index=False).encode('utf-8-sig'),
-                               f"Snapshot_{file_date}.csv")
+
+    # --- 11. LƯU / EXPORT ---
+    st.markdown("---")
+    cc1, cc2, cc3 = st.columns([1.4, 1, 1])
+    with cc1:
+        # LƯU DỮ LIỆU FINAL CỦA NGÀY -> đọc lại được ở trang Lịch sử
+        if st.button(f"💾 Lưu Final ngày {file_date}", use_container_width=True, type="primary"):
+            path = os.path.join(HISTORY_DIR, f"Final_{file_date}.csv")
+            snapshot.to_csv(path, index=False, encoding='utf-8-sig')
+            st.success(f"✅ Đã lưu: {path}")
+    with cc2:
+        st.download_button("📥 Tải bảng (CSV)", disp_df.to_csv(index=False).encode('utf-8-sig'),
+                           f"Report_{file_date}.csv", use_container_width=True)
+    with cc3:
+        st.download_button("📦 Tải snapshot", snapshot.to_csv(index=False).encode('utf-8-sig'),
+                           f"Snapshot_{file_date}.csv", use_container_width=True)
+    saved_path = os.path.join(HISTORY_DIR, f"Final_{file_date}.csv")
+    if os.path.exists(saved_path):
+        st.caption(f"📁 Ngày {file_date} đã có bản lưu. Bấm 'Lưu' lần nữa sẽ ghi đè.")
+
+# ==================== TRANG 3: LỊCH SỬ ====================
+if page == "📅 Lịch sử":
+    st.markdown('<div class="main-header">📅 XEM LẠI DỮ LIỆU FINAL CÁC NGÀY</div>', unsafe_allow_html=True)
+    files = sorted(glob.glob(os.path.join(HISTORY_DIR, "Final_*.csv")), reverse=True)
+    if not files:
+        st.info("Chưa có ngày nào được lưu. Vào trang 📊 Báo cáo → bấm '💾 Lưu Final' để lưu lại.")
+    else:
+        dates = [os.path.basename(f).replace("Final_", "").replace(".csv", "") for f in files]
+        sel = st.selectbox("Chọn ngày cần xem lại", dates)
+        sdf = pd.read_csv(os.path.join(HISTORY_DIR, f"Final_{sel}.csv"))
+
+        # KPI của ngày đã lưu
+        v = sdf[~sdf['📊 RESULT'].isin(["OFF", "NO DATA"])]
+        tp = int(sdf['Chốt $'].sum()); tt = format_time(sdf['actual_val'].sum())
+        tc = int(sdf['Tong_Cuoc_Goi'].sum())
+        tpct = round(v['actual_val'].sum() / v['target_val'].sum() * 100, 1) if v['target_val'].sum() > 0 else 0.0
+        nd = int((sdf['📊 RESULT'] == "GOOD JOB").sum())
+        st.markdown(f"""<div class="kpi-row">
+            <div class="kpi-card"><div class="kpi-ico" style="background:#F59E0B33;">💰</div>
+                <div class="kpi-label">Total Premium</div><div class="kpi-value">${tp:,}</div></div>
+            <div class="kpi-card"><div class="kpi-ico" style="background:#38BDF833;">⏱️</div>
+                <div class="kpi-label">Total Talktime</div><div class="kpi-value">{tt}</div></div>
+            <div class="kpi-card"><div class="kpi-ico" style="background:#818CF833;">📞</div>
+                <div class="kpi-label">Outgoing Calls</div><div class="kpi-value">{tc:,}</div></div>
+            <div class="kpi-card"><div class="kpi-ico" style="background:#34D39933;">✅</div>
+                <div class="kpi-label">Team hoàn thành</div><div class="kpi-value">{tpct:.1f}%</div></div>
+            <div class="kpi-card"><div class="kpi-ico" style="background:#FBBF2433;">🏆</div>
+                <div class="kpi-label">Đạt mục tiêu</div><div class="kpi-value">{nd}</div></div>
+        </div>""", unsafe_allow_html=True)
+
+        # Bảng ngày đã lưu (định dạng lại thời gian)
+        show = pd.DataFrame()
+        show['👤 SALES'] = sdf['Sales Name']; show['🏅 LVL'] = sdf['🏅 LVL']
+        show['💵 CHỐT $'] = sdf['Chốt $']
+        show['🎯 GOAL'] = sdf['target_val'].apply(format_time)
+        show['⏱️ CALL'] = sdf['actual_val'].apply(format_time)
+        if 'effective_sec' in sdf.columns:
+            show['🧮 QUY ĐỔI'] = sdf['effective_sec'].apply(format_time)
+        show['% HOÀN THÀNH'] = sdf['pct_val']
+        show['🔥 5P'] = sdf['Int_5p']; show['🔥 10P'] = sdf['Int_10p']; show['🔥 30P'] = sdf['Int_30p']
+        show['📊 RESULT'] = sdf['📊 RESULT']
+        st.dataframe(show, use_container_width=True, hide_index=True, height=(len(sdf)*38 + 50),
+            column_config={"💵 CHỐT $": st.column_config.NumberColumn(format="$%d"),
+                           "% HOÀN THÀNH": st.column_config.NumberColumn(format="%.1f%%")})
+        st.download_button("📥 Tải lại file ngày này", sdf.to_csv(index=False).encode('utf-8-sig'),
+                           f"Final_{sel}.csv")
 
 # ==================== CHƯA CÓ FILE ====================
-if not uploaded_file:
-    st.info("👋 Chào Team Henry! Hãy tải file RingCentral ở thanh bên để bắt đầu.")
+if page != "📅 Lịch sử" and not uploaded_file:
+    st.info("👋 Chào Team Henry! Tải file RingCentral ở thanh bên để bắt đầu, hoặc vào trang 📅 Lịch sử để xem ngày cũ.")
