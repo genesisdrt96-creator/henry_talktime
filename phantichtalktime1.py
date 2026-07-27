@@ -168,62 +168,24 @@ if uploaded_file:
     df_raw = pd.read_csv(uploaded_file)
     df_raw.columns = df_raw.columns.str.strip()
 
-    # --- BƯỚC LỌC 1: CHỈ GIỮ OUTGOING ---
+    # --- BƯỚC LỌC 1: CHỈ GIỮ OUTGOING (bỏ Incoming) ---
     if 'Direction' in df_raw.columns:
         df_raw = df_raw[df_raw['Direction'].astype(str).str.strip() == 'Outgoing']
     else:
         st.warning("⚠️ Không tìm thấy cột 'Direction'. Vui lòng kiểm tra lại định dạng file.")
 
-    # --- BƯỚC LỌC 2: CHỈ GIỮ LEG THẬT (Type == 'Voice') ---
-    # Row Transfer để trống cột Type -> tự động bị loại. Đây là bước chống thổi
-    # phồng talktime do các leg Transfer nhân bản nguyên duration.
+    # --- BƯỚC LỌC 2: BỎ CALL TRANSFER (chỉ giữ Type == 'Voice') ---
+    # Dòng Transfer để trống cột Type -> bị loại. Đây là bước duy nhất chống trùng lặp:
+    # loại các dòng Transfer vốn sao y nguyên duration của cuộc gốc.
     if 'Type' in df_raw.columns:
         df_raw['Type'] = df_raw['Type'].astype(str).str.strip()
         df_raw = df_raw[df_raw['Type'].str.lower() == 'voice']
     else:
-        st.warning("⚠️ Không tìm thấy cột 'Type'. Không thể lọc Transfer — số liệu có thể bị thổi phồng.")
+        st.warning("⚠️ Không tìm thấy cột 'Type'. Không thể lọc Transfer.")
 
     df_raw['Ext_Name'] = df_raw['Extension'].str.split(' - ', n=1).str[1].fillna("Unknown")
     df_raw['Sec'] = df_raw['Duration'].apply(to_seconds)
-
-    # --- BƯỚC LỌC 3: BỎ BLIP NỐI MÁY QUÁ NGẮN ---
-    df_raw = df_raw[df_raw['Sec'] >= REAL_TALK_MIN_SEC]
-
-    # --- DỰNG MỐC THỜI GIAN (Time chỉ có độ phân giải PHÚT) ---
-    df_raw['Start'] = pd.to_datetime(
-        df_raw['Date'].astype(str).str.strip() + ' ' + df_raw['Time'].astype(str).str.strip(),
-        format='%a %m/%d/%Y %I:%M %p', errors='coerce'
-    )
-    df_raw = df_raw.dropna(subset=['Start'])
-    df_raw['End'] = df_raw['Start'] + pd.to_timedelta(df_raw['Sec'], unit='s')
-
-    # --- MERGE INTERVAL: talktime = UNION các khoảng (wall-clock), số cuộc = số phiên ---
-    # Các leg VoIP chồng lấn thời gian của cùng một cuộc bị transfer lòng vòng
-    # sẽ được gộp thành 1 phiên; talktime tính theo thời gian đường dây thực bận
-    # dưới ext của agent, không cộng dồn từng leg.
-    def _merge_sessions(g):
-        g = g.sort_values('Start')
-        talk, cnt, cs, ce = 0, 0, None, None
-        sess_max = []
-        for s, e, sec in zip(g['Start'], g['End'], g['Sec']):
-            if ce is None or s > ce:            # phiên mới (không chồng)
-                if ce is not None:
-                    talk += (ce - cs).total_seconds()
-                cs, ce, cnt = s, e, cnt + 1
-                sess_max.append(sec)
-            else:                                # chồng lấn -> nới phiên hiện tại
-                ce = max(ce, e)
-                sess_max[-1] = max(sess_max[-1], sec)
-        if ce is not None:
-            talk += (ce - cs).total_seconds()
-        ss = pd.Series(sess_max, dtype=float)
-        return pd.Series({
-            'Actual_Sec': talk,
-            'Tong_Cuoc_Goi': cnt,
-            'Int_5p':  int((ss >= 300).sum()),
-            'Int_10p': int((ss >= 600).sum()),
-            'Int_30p': int((ss >= 1800).sum()),
-        })
+    # LƯU Ý: GIỮ cả leg ngắn (< 20s) theo yêu cầu — không lọc blip, không merge overlap.
 
     # BÁO CÁO TẤT CẢ nhân viên theo đúng thứ tự STAFF_LIST (không lọc bỏ ai).
     # Người không xuất hiện trong file RingCentral -> nhóm "không có data" (ghi chú).
@@ -234,7 +196,14 @@ if uploaded_file:
 
     df_active = df_raw[df_raw['Ext_Name'].isin(active_staff)]
     if len(df_active):
-        stats = df_active.groupby('Ext_Name').apply(_merge_sessions).reindex(active_staff).fillna(0)
+        # TALKTIME = TỔNG duration các leg Voice còn lại (cộng thẳng, không union).
+        stats = df_active.groupby('Ext_Name').agg(
+            Actual_Sec=('Sec', 'sum'),
+            Tong_Cuoc_Goi=('Sec', 'count'),
+            Int_5p=('Sec', lambda x: int((x >= 300).sum())),
+            Int_10p=('Sec', lambda x: int((x >= 600).sum())),
+            Int_30p=('Sec', lambda x: int((x >= 1800).sum())),
+        ).reindex(active_staff).fillna(0)
     else:
         stats = pd.DataFrame(
             0, index=active_staff,
