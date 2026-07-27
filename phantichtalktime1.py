@@ -168,9 +168,14 @@ if uploaded_file:
     df_raw = pd.read_csv(uploaded_file)
     df_raw.columns = df_raw.columns.str.strip()
 
-    # --- BƯỚC LỌC 1: CHỈ GIỮ OUTGOING (bỏ Incoming) ---
+    # --- BƯỚC LỌC 1: CHỈ GIỮ OUTGOING — XÓA THẲNG MỌI DÒNG INCOMING ---
+    n_incoming = 0
     if 'Direction' in df_raw.columns:
-        df_raw = df_raw[df_raw['Direction'].astype(str).str.strip() == 'Outgoing']
+        _dir = df_raw['Direction'].astype(str).str.strip().str.lower()
+        n_incoming = int((_dir == 'incoming').sum())
+        df_raw = df_raw[_dir == 'outgoing']          # bỏ Incoming + mọi dòng không phải Outgoing
+        if n_incoming:
+            st.sidebar.caption(f"🚫 Đã loại {n_incoming} dòng Incoming khỏi talktime.")
     else:
         st.warning("⚠️ Không tìm thấy cột 'Direction'. Vui lòng kiểm tra lại định dạng file.")
 
