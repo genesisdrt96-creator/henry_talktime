@@ -342,7 +342,7 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
         return styles
 
     st.dataframe(disp_df.style.apply(apply_row_styles, axis=1), use_container_width=True, hide_index=True, height=((len(active_staff)+1)*38+50),
-        column_config={"💵 CHỐT $": st.column_config.NumberColumn(format="$%d"), "% HOÀN THÀNH": st.column_config.NumberColumn(format="%.1f%%")})
+        column_config={"💵 CHỐT $": st.column_config.NumberColumn(format="$%d"), "% HOÀN THÀNH": st.column_config.NumberColumn(format="%.0f%%")})
 
     # --- GHI CHÚ: nhân viên không có dữ liệu talktime ---
     if no_data_staff:
@@ -352,14 +352,14 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
     with st.expander("📋 Copy cột '% HOÀN THÀNH' để dán sang Google Sheet"):
         st.caption("Bấm biểu tượng copy ở góc phải ô bên dưới → sang Google Sheet, chọn 1 ô rồi Ctrl+V. "
                    "Các dòng sẽ tự đổ xuống thành 1 cột, đúng thứ tự như bảng (kèm dòng TOTAL cuối).")
-        pct_with_sign = "\n".join(f"{v:.1f}%" for v in final_df['pct_val']) + f"\n{tot_pct:.1f}%"
-        pct_plain = "\n".join(f"{v:.1f}" for v in final_df['pct_val']) + f"\n{tot_pct:.1f}"
+        pct_with_sign = "\n".join(f"{v:.0f}%" for v in final_df['pct_val']) + f"\n{tot_pct:.0f}%"
+        pct_plain = "\n".join(f"{v:.0f}" for v in final_df['pct_val']) + f"\n{tot_pct:.0f}"
         cA, cB = st.columns(2)
         with cA:
-            st.markdown("**Có dấu %** (Sheet hiểu là phần trăm)")
+            st.markdown("**Có dấu %** (vd 53%)")
             st.code(pct_with_sign, language=None)
         with cB:
-            st.markdown("**Số thường** (không có %, dễ tính toán)")
+            st.markdown("**Số thường** (vd 53, dễ tính toán)")
             st.code(pct_plain, language=None)
 
     # --- 9. BIỂU ĐỒ (phân nhóm trạng thái + đường mục tiêu 100%) ---
@@ -473,7 +473,7 @@ if page == "📅 Lịch sử":
         show['📊 RESULT'] = sdf['📊 RESULT']
         st.dataframe(show, use_container_width=True, hide_index=True, height=(len(sdf)*38 + 50),
             column_config={"💵 CHỐT $": st.column_config.NumberColumn(format="$%d"),
-                           "% HOÀN THÀNH": st.column_config.NumberColumn(format="%.1f%%")})
+                           "% HOÀN THÀNH": st.column_config.NumberColumn(format="%.0f%%")})
         st.download_button("📥 Tải lại file ngày này", sdf.to_csv(index=False).encode('utf-8-sig'),
                            f"Final_{sel}.csv")
 
