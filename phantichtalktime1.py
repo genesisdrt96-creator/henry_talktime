@@ -224,21 +224,26 @@ if uploaded_file:
     final_df.rename(columns={'index': 'Sales Name'}, inplace=True)
 
     def calculate_metrics(row):
-        name = row['Sales Name']; lvl = STAFF_CONFIG.get(name, "Probation"); target_orig = LEVEL_TARGETS.get(lvl, 9000); actual = row['Actual_Sec']
-        if row['Xin OFF']: return pd.Series([lvl, target_orig, actual, 0, 0.0, "OFF"])
+        name = row['Sales Name']; lvl = STAFF_CONFIG.get(name, "Probation")
+        target_orig = LEVEL_TARGETS.get(lvl, 9000); actual = row['Actual_Sec']
+        giam_p = float(row['Giảm số P'])                       # phút — hiển thị riêng + cộng vào Total
+        if row['Xin OFF']:
+            return pd.Series([lvl, target_orig, giam_p, actual, actual, 0.0, "OFF"])
         sales = row['Chốt $']
-        # Không có mặt trong file RingCentral và cũng chưa chốt $ -> đánh dấu NO DATA (đưa vào ghi chú)
         if name in NO_DATA_SET and sales == 0:
-            return pd.Series([lvl, target_orig, 0, 0, 0.0, "NO DATA"])
+            return pd.Series([lvl, target_orig, giam_p, 0, 0, 0.0, "NO DATA"])
+        is_done = sales >= 2000
         bonus = 1800 if 300 <= sales < 500 else (2700 if 500 <= sales < 1000 else (5400 if 1000 <= sales < 2000 else 0))
-        is_done = sales >= 2000; total_red = (target_orig if is_done else (bonus + row['Giảm số P'] * 60))
-        target_final = max(0, target_orig - total_red); pct = 100.0 if (is_done or target_final <= 0) else (actual / target_final * 100)
-        return pd.Series([lvl, target_final, actual, total_red, round(float(pct), 1), "GOOD JOB" if pct >= 100.0 or is_done else "Come on!"])
+        goal = 0 if is_done else max(0, target_orig - bonus)   # GOAL: trừ bonus (rule cũ), KHÔNG trừ Giảm số P
+        total = actual + giam_p * 60                            # Total = talktime + Giảm số P
+        pct = 100.0 if (is_done or goal <= 0) else total / goal * 100
+        return pd.Series([lvl, goal, giam_p, actual, total, round(float(pct), 1),
+                          "GOOD JOB" if (pct >= 100 or is_done) else "COME ON!"])
 
-    final_df[['🏅 LVL', 'target_val', 'actual_val', 'red_val', 'pct_val', '📊 RESULT']] = final_df.apply(calculate_metrics, axis=1)
-    # Talktime QUY ĐỔI = talktime thật + phần giờ được cộng bù (hoặc trừ). Done (red>=9000) -> giữ talktime thật.
-    final_df['effective_sec'] = final_df.apply(
-        lambda r: r['actual_val'] if r['red_val'] >= 9000 else r['actual_val'] + r['red_val'], axis=1)
+    final_df[['🏅 LVL', 'goal_val', 'giam_p', 'actual_val', 'total_val', 'pct_val', '📊 RESULT']] = final_df.apply(calculate_metrics, axis=1)
+    # % lấy CỘT CAO NHẤT làm tham chiếu (để so sánh tương đối giữa các bạn)
+    _vv = final_df[~final_df['📊 RESULT'].isin(["OFF", "NO DATA"])]
+    max_pct = float(_vv['pct_val'].max()) if len(_vv) and _vv['pct_val'].max() > 0 else 100.0
     # GIỮ THỨ TỰ CỐ ĐỊNH theo STAFF_LIST (không sort theo hiệu suất)
     final_df = final_df.reset_index(drop=True)
 
@@ -258,99 +263,107 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
     t_t = format_time(final_df['Actual_Sec'].sum())
     t_c = int(final_df['Tong_Cuoc_Goi'].sum())
     _valid = final_df[~final_df['📊 RESULT'].isin(["OFF", "NO DATA"])]
-    team_pct = round(_valid['actual_val'].sum() / _valid['target_val'].sum() * 100, 1) if _valid['target_val'].sum() > 0 else 0.0
+    team_pct = round(_valid['total_val'].sum() / _valid['goal_val'].sum() * 100, 1) if _valid['goal_val'].sum() > 0 else 0.0
     n_done = int((final_df['📊 RESULT'] == "GOOD JOB").sum())
     n_active = int(len(_valid))
 
-    # --- 8. BẢNG HIỂN THỊ ---
-    disp_df = pd.DataFrame()
-    disp_df['👤 SALES'] = final_df['Sales Name']; disp_df['🏅 LVL'] = final_df['🏅 LVL']
-    disp_df['💵 CHỐT $'] = final_df['Chốt $']
-
-    def _fmt_goal(r):
-        return "—" if r['📊 RESULT'] == "NO DATA" else format_time(r['target_val'])
-    def _fmt_call(r):
-        return "—" if r['📊 RESULT'] == "NO DATA" else format_time(r['actual_val'])
-    def _fmt_eff(r):
-        return "—" if r['📊 RESULT'] == "NO DATA" else format_time(r['effective_sec'])
-    disp_df['🎯 GOAL'] = final_df.apply(_fmt_goal, axis=1)
-    disp_df['⏱️ CALL'] = final_df.apply(_fmt_call, axis=1)
-    disp_df['🧮 QUY ĐỔI'] = final_df.apply(_fmt_eff, axis=1)          # talktime sau cộng/trừ giờ
-    disp_df['📉 GIẢM TALKTIME'] = final_df.apply(
-        lambda r: "—" if r['📊 RESULT'] == "NO DATA" else ("🏆 DONE" if r['red_val'] >= 9000 else f"{int(r['red_val']//60)}p"), axis=1)
-    disp_df['% HOÀN THÀNH'] = final_df['pct_val']
-    disp_df['🔥 5P'] = final_df['Int_5p'].astype(int); disp_df['🔥 10P'] = final_df['Int_10p'].astype(int)
-    disp_df['🔥 30P'] = final_df['Int_30p'].astype(int); disp_df['📊 RESULT'] = final_df['📊 RESULT']
-
-    # --- HÀNG TỔNG ---
+    # --- 8. BẢNG (dữ liệu để export CSV; bảng hiển thị là HTML bên dưới) ---
     valid = final_df[~final_df['📊 RESULT'].isin(["OFF", "NO DATA"])]
-    tot_target = valid['target_val'].sum()
-    tot_actual = valid['actual_val'].sum()
-    tot_pct = round(tot_actual / tot_target * 100, 1) if tot_target > 0 else 0.0
+    tot_goal = valid['goal_val'].sum()
+    tot_total = valid['total_val'].sum()
+    tot_pct = round(tot_total / tot_goal * 100, 1) if tot_goal > 0 else 0.0
+
+    def _nd(r, v):  # "—" nếu NO DATA
+        return "—" if r['📊 RESULT'] == "NO DATA" else v
+    disp_df = pd.DataFrame()
+    disp_df['👤 SALES'] = final_df['Sales Name']
+    disp_df['🏅 LVL'] = final_df['🏅 LVL']
+    disp_df['💵 CHỐT $'] = final_df['Chốt $']
+    disp_df['🎯 GOAL'] = final_df.apply(lambda r: _nd(r, format_time(r['goal_val'])), axis=1)
+    disp_df['➖ GIẢM SỐ P'] = final_df.apply(lambda r: _nd(r, f"{int(r['giam_p'])}p"), axis=1)
+    disp_df['⏱️ CALL'] = final_df.apply(lambda r: _nd(r, format_time(r['actual_val'])), axis=1)
+    disp_df['🧮 TOTAL'] = final_df.apply(lambda r: _nd(r, format_time(r['total_val'])), axis=1)
+    disp_df['% HOÀN THÀNH'] = final_df['pct_val']
+    disp_df['📞 TỔNG CUỘC'] = final_df['Tong_Cuoc_Goi'].astype(int)
+    disp_df['🔥 5P'] = final_df['Int_5p'].astype(int)
+    disp_df['🔥 10P'] = final_df['Int_10p'].astype(int)
+    disp_df['🔥 30P'] = final_df['Int_30p'].astype(int)
+    disp_df['Σ >5P'] = (final_df['Int_5p'] + final_df['Int_10p'] + final_df['Int_30p']).astype(int)
+    disp_df['📊 RESULT'] = final_df['📊 RESULT']
+
     total_row = {
         '👤 SALES': '🔷 TOTAL', '🏅 LVL': '',
         '💵 CHỐT $': float(final_df['Chốt $'].sum()),
-        '🎯 GOAL': format_time(tot_target),
+        '🎯 GOAL': format_time(tot_goal),
+        '➖ GIẢM SỐ P': f"{int(valid['giam_p'].sum())}p",
         '⏱️ CALL': format_time(final_df['actual_val'].sum()),
-        '🧮 QUY ĐỔI': format_time(valid['effective_sec'].sum()),
-        '📉 GIẢM TALKTIME': '',
+        '🧮 TOTAL': format_time(tot_total),
         '% HOÀN THÀNH': tot_pct,
+        '📞 TỔNG CUỘC': int(final_df['Tong_Cuoc_Goi'].sum()),
         '🔥 5P': int(final_df['Int_5p'].sum()),
         '🔥 10P': int(final_df['Int_10p'].sum()),
         '🔥 30P': int(final_df['Int_30p'].sum()),
+        'Σ >5P': int((final_df['Int_5p'] + final_df['Int_10p'] + final_df['Int_30p']).sum()),
         '📊 RESULT': '',
     }
     disp_df = pd.concat([disp_df, pd.DataFrame([total_row])], ignore_index=True)
-    # (Bảng chính giờ là bảng HTML toàn cảnh bên dưới; disp_df vẫn dùng để export CSV.)
 
     # --- GHI CHÚ: nhân viên không có dữ liệu talktime ---
     if no_data_staff:
         st.warning(f"📝 **Không có dữ liệu talktime ({len(no_data_staff)}):** " + " • ".join(no_data_staff))
 
     # ================= CHẾ ĐỘ TOÀN MÀN HÌNH (tiêu đề + KPI + bảng cùng lúc) =================
-    def _bar(pct, label):
+    def _bar_green(pct, label):   # Total so với GOAL — xanh nhạt
         p = max(0, min(pct, 100))
-        if pct >= 100:
-            fill, txt = "#EF4444", "#ffffff"       # ĐỎ khi đạt/vượt 100%
-        else:
-            fill, txt = "#FDE68A", "#7A5B00"       # VÀNG NHẠT khi chưa đạt
+        return (f'<div class="pbar"><div class="pfill" style="width:{p:.0f}%;background:#A7D8B0;"></div>'
+                f'<span style="color:#1E5631;">{label}</span></div>')
+
+    def _bar_pct(rel_w, real_pct, label):   # % — dài so với cột cao nhất; màu theo ngưỡng
+        p = max(0, min(rel_w, 100))
+        if real_pct >= 100: fill, txt = "#EF4444", "#ffffff"
+        else:               fill, txt = "#FDE68A", "#7A5B00"
         return (f'<div class="pbar"><div class="pfill" style="width:{p:.0f}%;background:{fill};"></div>'
                 f'<span style="color:{txt};">{label}</span></div>')
 
     rows_html = ""
     for _, r in final_df.iterrows():
         res = r['📊 RESULT']; lvl = r['🏅 LVL']
+        s5, s10, s30 = int(r["Int_5p"]), int(r["Int_10p"]), int(r["Int_30p"])
         if res == "NO DATA":
             rows_html += (f'<tr class="nod"><td>{r["Sales Name"]}</td><td>{lvl}</td>'
-                          f'<td>—</td><td>—</td><td>—</td><td>—</td><td>—</td>'
-                          f'<td>{int(r["Int_5p"])}</td><td>{int(r["Int_10p"])}</td><td>{int(r["Int_30p"])}</td>'
+                          f'<td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td>'
+                          f'<td>0</td><td>{s5}</td><td>{s10}</td><td>{s30}</td><td>{s5+s10+s30}</td>'
                           f'<td class="badge nodb">NO DATA</td></tr>')
             continue
         lvl_bg = LEVEL_COLORS.get(lvl, "#FFFFFF"); lvl_tx = LEVEL_TEXT.get(lvl, "#12326B")
         chot = f"${int(r['Chốt $']):,}" if r['Chốt $'] > 0 else "$0"
         chot_style = 'style="background:#FEF3C7;color:#92400E;"' if r['Chốt $'] > 0 else ''
-        eff_bar = _bar(r['effective_sec'] / 9000 * 100, format_time(r['effective_sec']))
-        pct_bar = _bar(r['pct_val'], f"{r['pct_val']:.0f}%")
+        total_bar = _bar_green(r['total_val'] / r['goal_val'] * 100 if r['goal_val'] > 0 else 100,
+                               format_time(r['total_val']))
+        pct_bar = _bar_pct(r['pct_val'] / max_pct * 100, r['pct_val'], f"{r['pct_val']:.0f}%")
         if res == "GOOD JOB": badge = '<td class="badge okb">GOOD JOB</td>'
         elif res == "OFF":    badge = '<td class="badge offb">OFF</td>'
-        else:                 badge = '<td class="badge cmb">Come on!</td>'
+        else:                 badge = '<td class="badge cmb">COME ON!</td>'
         rows_html += (f'<tr><td>{r["Sales Name"]}</td>'
                       f'<td style="background:{lvl_bg};color:{lvl_tx};">{lvl}</td>'
                       f'<td {chot_style}>{chot}</td>'
-                      f'<td>{format_time(r["target_val"])}</td>'
+                      f'<td>{format_time(r["goal_val"])}</td>'
+                      f'<td>{int(r["giam_p"])}p</td>'
                       f'<td>{format_time(r["actual_val"])}</td>'
-                      f'<td>{eff_bar}</td><td>{pct_bar}</td>'
-                      f'<td>{int(r["Int_5p"])}</td><td>{int(r["Int_10p"])}</td><td>{int(r["Int_30p"])}</td>'
+                      f'<td>{total_bar}</td><td>{pct_bar}</td>'
+                      f'<td>{int(r["Tong_Cuoc_Goi"])}</td>'
+                      f'<td>{s5}</td><td>{s10}</td><td>{s30}</td><td><b>{s5+s10+s30}</b></td>'
                       f'{badge}</tr>')
-    # hàng tổng
+    T5, T10, T30 = int(final_df["Int_5p"].sum()), int(final_df["Int_10p"].sum()), int(final_df["Int_30p"].sum())
     rows_html += (f'<tr class="tot"><td>TOTAL</td><td></td>'
                   f'<td>${int(final_df["Chốt $"].sum()):,}</td>'
-                  f'<td>{format_time(tot_target)}</td>'
+                  f'<td>{format_time(tot_goal)}</td>'
+                  f'<td>{int(valid["giam_p"].sum())}p</td>'
                   f'<td>{format_time(final_df["actual_val"].sum())}</td>'
-                  f'<td>{format_time(valid["effective_sec"].sum())}</td>'
+                  f'<td>{format_time(tot_total)}</td>'
                   f'<td>{tot_pct:.0f}%</td>'
-                  f'<td>{int(final_df["Int_5p"].sum())}</td><td>{int(final_df["Int_10p"].sum())}</td>'
-                  f'<td>{int(final_df["Int_30p"].sum())}</td><td></td></tr>')
+                  f'<td>{int(final_df["Tong_Cuoc_Goi"].sum())}</td>'
+                  f'<td>{T5}</td><td>{T10}</td><td>{T30}</td><td>{T5+T10+T30}</td><td></td></tr>')
 
     kpi_html = f"""
       <div class="kpis">
@@ -370,8 +383,9 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
       {kpi_html}
       <table>
         <thead><tr>
-          <th>SALES</th><th>LVL</th><th>CHỐT $</th><th>GOAL</th><th>CALL</th>
-          <th>QUY ĐỔI</th><th>% HOÀN THÀNH</th><th>5P</th><th>10P</th><th>30P</th><th>RESULT</th>
+          <th>SALES</th><th>LVL</th><th>CHỐT $</th><th>GOAL</th><th>GIẢM SỐ P</th><th>CALL</th>
+          <th>TOTAL</th><th>% HOÀN THÀNH</th><th>TỔNG CUỘC</th>
+          <th>5P</th><th>10P</th><th>30P</th><th>Σ&gt;5P</th><th>RESULT</th>
         </tr></thead>
         <tbody>{rows_html}</tbody>
       </table>
@@ -484,7 +498,7 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
 
     # --- 10. SNAPSHOT (dạng số + có cột Date) ---
     snapshot = final_df[['Sales Name', '🏅 LVL', 'Xin OFF', 'Chốt $',
-                         'target_val', 'actual_val', 'effective_sec', 'red_val', 'pct_val',
+                         'goal_val', 'giam_p', 'actual_val', 'total_val', 'pct_val',
                          'Tong_Cuoc_Goi', 'Int_5p', 'Int_10p', 'Int_30p', '📊 RESULT']].copy()
     snapshot.insert(0, 'Date', file_date)
 
@@ -522,7 +536,9 @@ if page == "📅 Lịch sử":
         v = sdf[~sdf['📊 RESULT'].isin(["OFF", "NO DATA"])]
         tp = int(sdf['Chốt $'].sum()); tt = format_time(sdf['actual_val'].sum())
         tc = int(sdf['Tong_Cuoc_Goi'].sum())
-        tpct = round(v['actual_val'].sum() / v['target_val'].sum() * 100, 1) if v['target_val'].sum() > 0 else 0.0
+        _gcol = 'goal_val' if 'goal_val' in sdf.columns else 'target_val'
+        _tcol = 'total_val' if 'total_val' in sdf.columns else 'actual_val'
+        tpct = round(v[_tcol].sum() / v[_gcol].sum() * 100, 1) if v[_gcol].sum() > 0 else 0.0
         nd = int((sdf['📊 RESULT'] == "GOOD JOB").sum())
         st.markdown(f"""<div class="kpi-row">
             <div class="kpi-card"><div class="kpi-ico" style="background:#F59E0B33;">💰</div>
@@ -532,7 +548,7 @@ if page == "📅 Lịch sử":
             <div class="kpi-card"><div class="kpi-ico" style="background:#818CF833;">📞</div>
                 <div class="kpi-label">Outgoing Calls</div><div class="kpi-value">{tc:,}</div></div>
             <div class="kpi-card"><div class="kpi-ico" style="background:#34D39933;">✅</div>
-                <div class="kpi-label">Team hoàn thành</div><div class="kpi-value">{tpct:.1f}%</div></div>
+                <div class="kpi-label">Team hoàn thành</div><div class="kpi-value">{tpct:.0f}%</div></div>
             <div class="kpi-card"><div class="kpi-ico" style="background:#FBBF2433;">🏆</div>
                 <div class="kpi-label">Đạt mục tiêu</div><div class="kpi-value">{nd}</div></div>
         </div>""", unsafe_allow_html=True)
@@ -541,12 +557,15 @@ if page == "📅 Lịch sử":
         show = pd.DataFrame()
         show['👤 SALES'] = sdf['Sales Name']; show['🏅 LVL'] = sdf['🏅 LVL']
         show['💵 CHỐT $'] = sdf['Chốt $']
-        show['🎯 GOAL'] = sdf['target_val'].apply(format_time)
+        show['🎯 GOAL'] = sdf[_gcol].apply(format_time)
+        if 'giam_p' in sdf.columns:
+            show['➖ GIẢM SỐ P'] = sdf['giam_p'].apply(lambda x: f"{int(x)}p")
         show['⏱️ CALL'] = sdf['actual_val'].apply(format_time)
-        if 'effective_sec' in sdf.columns:
-            show['🧮 QUY ĐỔI'] = sdf['effective_sec'].apply(format_time)
+        show['🧮 TOTAL'] = sdf[_tcol].apply(format_time)
         show['% HOÀN THÀNH'] = sdf['pct_val']
+        show['📞 TỔNG CUỘC'] = sdf['Tong_Cuoc_Goi']
         show['🔥 5P'] = sdf['Int_5p']; show['🔥 10P'] = sdf['Int_10p']; show['🔥 30P'] = sdf['Int_30p']
+        show['Σ >5P'] = sdf['Int_5p'] + sdf['Int_10p'] + sdf['Int_30p']
         show['📊 RESULT'] = sdf['📊 RESULT']
         st.dataframe(show, use_container_width=True, hide_index=True, height=(len(sdf)*38 + 50),
             column_config={"💵 CHỐT $": st.column_config.NumberColumn(format="$%d"),
