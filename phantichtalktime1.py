@@ -49,7 +49,7 @@ st.markdown("""
     .kpi-sub   { font-size:14px; font-weight:700; color:#3B82F6; margin-top:2px; }
     [data-testid="stDataFrame"] td, [data-testid="stDataFrame"] th {
         border: none !important; color: #0f172a !important;
-        font-weight: 900 !important; font-size: 16px !important; padding: 11px !important;
+        font-weight: 900 !important; font-size: 12px !important; padding: 6px 6px !important;
     }
     /* Tiêu đề điều hướng trong sidebar */
     .nav-title {
@@ -428,17 +428,17 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
                   align-items:center;justify-content:center;font-size:23px; }}
       .kpi .lb {{ font-size:14px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:#6B7A90; }}
       .kpi .vl {{ font-size:34px;font-weight:900;color:#12326B; }}
-      table {{ width:100%; border-collapse:separate; border-spacing:0 7px; }}
-      th {{ font-size:15px; font-weight:900; color:#3A4A63; text-align:center; padding:8px 6px;
-            text-transform:uppercase; letter-spacing:.3px; }}
-      td {{ font-size:20px; font-weight:800; text-align:center; padding:13px 8px; background:#fff; color:#1F2A44; }}
+      table {{ width:auto; margin:0 auto; border-collapse:separate; border-spacing:0 5px; }}
+      th {{ font-size:12px; font-weight:900; color:#3A4A63; text-align:center; padding:6px 4px;
+            text-transform:uppercase; letter-spacing:.2px; }}
+      td {{ font-size:15px; font-weight:800; text-align:center; padding:9px 5px; background:#fff; color:#1F2A44; }}
       tr td:first-child {{ border-radius:12px 0 0 12px; }}
       tr td:last-child  {{ border-radius:0 12px 12px 0; }}
       tr.nod td {{ background:#F3F6FB; color:#9AA6B8; font-weight:700; }}
-      tr.tot td {{ background:#33507A; color:#fff; font-weight:900; font-size:21px; }}
-      .pbar {{ position:relative; height:30px; background:#EEF2F8; border-radius:9px; overflow:hidden; }}
+      tr.tot td {{ background:#33507A; color:#fff; font-weight:900; font-size:16px; }}
+      .pbar {{ position:relative; height:23px; background:#EEF2F8; border-radius:7px; overflow:hidden; }}
       .pfill {{ position:absolute; left:0; top:0; bottom:0; }}
-      .pbar span {{ position:relative; z-index:2; line-height:30px; font-weight:900; color:#22314A; font-size:16px; }}
+      .pbar span {{ position:relative; z-index:2; line-height:23px; font-weight:900; color:#22314A; font-size:13px; }}
       .badge {{ border-radius:10px; font-weight:900; }}
       .okb {{ background:#DCFCE7; color:#166534; }}
       .cmb {{ background:#FEE2E2; color:#B91C1C; }}
