@@ -122,6 +122,76 @@ def format_time(seconds):
     h, m, s = int(seconds // 3600), int((seconds % 3600) // 60), int(seconds % 60)
     return f"{h:02d}:{m:02d}:{s:02d}"
 
+def extract_report_range(df):
+    """Trả về (date_from, date_to, n_days) dạng MM/DD/YYYY từ cột Date của file RingCentral."""
+    if 'Date' not in df.columns:
+        return (None, None, 0)
+    s = pd.to_datetime(df['Date'].astype(str).str.strip(), format='%a %m/%d/%Y', errors='coerce').dropna()
+    if len(s) == 0:
+        return (None, None, 0)
+    days = sorted(pd.Series(s.dt.normalize().unique()))
+    dfrom = pd.Timestamp(days[0]).strftime('%m/%d/%Y')
+    dto = pd.Timestamp(days[-1]).strftime('%m/%d/%Y')
+    return (dfrom, dto, len(days))
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _read_gsheet(url):
+    return pd.read_csv(url)
+
+def gsheet_apply(url, date_from, date_to):
+    """Nạp dữ liệu từ Google Sheet (published CSV).
+    - 1 ngày (date_from == date_to): đổ Chốt + OFF + Số P của ngày đó.
+    - Nhiều ngày (theo tháng): CỘNG DỒN Chốt cả khoảng (chỉ Chốt), bỏ OFF/Số P.
+    Trả về số dòng đã nạp, hoặc -1 nếu lỗi đọc."""
+    try:
+        g = _read_gsheet(url).copy()
+    except Exception as e:
+        st.sidebar.error(f"Không đọc được Google Sheet: {e}")
+        return -1
+    g.columns = [str(c).strip() for c in g.columns]
+    colmap = {}
+    for c in g.columns:
+        cl = c.lower()
+        if cl in ('date', 'ngày', 'ngay', 'ngày hoạt động', 'ngay hoat dong'): colmap[c] = 'Date'
+        elif cl in ('sales name', 'name', 'tên', 'ten', 'sales', 'nhân viên', 'nhan vien', 'tên nhân viên'): colmap[c] = 'Sales Name'
+        elif cl in ('chốt', 'chot', 'chốt $', 'chot $', 'premium', 'doanh số', 'doanh so'): colmap[c] = 'Chốt'
+        elif cl == 'off' or 'xin off' in cl or cl in ('nghỉ', 'nghi', 'off hôm nay?', 'off hom nay?'): colmap[c] = 'OFF'
+        elif cl in ('số p', 'so p', 'giảm số p', 'giam so p', 'p', 'giảm p', 'giam p'): colmap[c] = 'Số P'
+    g = g.rename(columns=colmap)
+    if 'Date' not in g.columns or 'Sales Name' not in g.columns:
+        st.sidebar.warning("Google Sheet cần tối thiểu 2 cột: Date và Sales Name.")
+        return 0
+    g['_d'] = pd.to_datetime(g['Date'].astype(str).str.strip(), errors='coerce')
+    d0 = pd.to_datetime(date_from, errors='coerce'); d1 = pd.to_datetime(date_to, errors='coerce')
+    sel = g[(g['_d'] >= d0) & (g['_d'] <= d1)].copy()
+    sel['_nm'] = sel['Sales Name'].astype(str).str.strip()
+    n = 0
+    if date_from == date_to:
+        # --- 1 NGÀY: Chốt + OFF + Số P (nếu trùng, lấy dòng cuối) ---
+        for nm in sel['_nm'].unique():
+            if nm not in st.session_state.input_df.index:
+                continue
+            r = sel[sel['_nm'] == nm].iloc[-1]
+            if 'Chốt' in sel.columns and pd.notna(r.get('Chốt')) and str(r.get('Chốt')).strip() != '':
+                try: st.session_state.input_df.loc[nm, 'Chốt $'] = float(r['Chốt'])
+                except Exception: pass
+            if 'OFF' in sel.columns:
+                v = str(r.get('OFF', '')).strip().lower()
+                st.session_state.input_df.loc[nm, 'Xin OFF'] = v in ('true', '1', 'x', 'off', 'yes', 'có', 'co')
+            if 'Số P' in sel.columns and pd.notna(r.get('Số P')) and str(r.get('Số P')).strip() != '':
+                try: st.session_state.input_df.loc[nm, 'Giảm số P'] = float(r['Số P'])
+                except Exception: pass
+            n += 1
+    else:
+        # --- THEO THÁNG: chỉ CỘNG DỒN Chốt cả khoảng ---
+        if 'Chốt' in sel.columns:
+            sel['_chot'] = pd.to_numeric(sel['Chốt'], errors='coerce').fillna(0)
+            for nm, val in sel.groupby('_nm')['_chot'].sum().items():
+                if nm in st.session_state.input_df.index:
+                    st.session_state.input_df.loc[nm, 'Chốt $'] = float(val)
+                    n += 1
+    return n
+
 # --- 3. SESSION STATE ---
 if 'input_df' not in st.session_state:
     st.session_state.input_df = pd.DataFrame({
@@ -145,6 +215,23 @@ def update_input():
 st.sidebar.markdown("# 💎 Master Dashboard")
 uploaded_file = st.sidebar.file_uploader("📂 Tải file RingCentral", type=["csv"])
 
+# --- LIÊN KẾT GOOGLE SHEET NHẬP LIỆU (Chốt / OFF / Số P theo ngày) ---
+_default_gs = ""
+try:
+    _default_gs = st.secrets.get("GSHEET_CSV_URL", "")
+except Exception:
+    _default_gs = ""
+with st.sidebar.expander("🔗 Google Sheet nhập liệu", expanded=False):
+    gs_url = st.text_input("Link CSV published của Google Sheet",
+                           value=st.session_state.get("gsheet_url", _default_gs),
+                           help="File > Share > Publish to web > chọn sheet > CSV, rồi dán link vào đây.")
+    st.session_state["gsheet_url"] = gs_url
+    if st.button("🔄 Đồng bộ lại từ Google Sheet", use_container_width=True):
+        st.session_state.pop("gs_synced", None)
+        _read_gsheet.clear()
+        st.rerun()
+    st.caption("Nhập Chốt/OFF/Số P theo ngày trên Google Sheet 1 lần — web tự liên kết theo ngày của file CSV.")
+
 # Thư mục lưu dữ liệu Final theo ngày (nằm cạnh file .py)
 HISTORY_DIR = "history"
 os.makedirs(HISTORY_DIR, exist_ok=True)
@@ -166,6 +253,18 @@ page = st.session_state.page
 if uploaded_file:
     df_raw = pd.read_csv(uploaded_file)
     df_raw.columns = df_raw.columns.str.strip()
+
+    # KHOẢNG NGÀY của báo cáo (để link Google Sheet + hiển thị range nếu chạy theo tháng)
+    date_from, date_to, n_days = extract_report_range(df_raw)
+    is_range = bool(date_from and date_to and date_from != date_to)
+    report_date = date_from                                   # dùng cho khớp 1 ngày
+    if date_from:
+        if is_range:
+            file_date = f"{date_from.replace('/','-')}_den_{date_to.replace('/','-')}"
+            static_time = f"{date_from} → {date_to}  ({n_days} ngày) | {now.strftime('%H:%M')}"
+        else:
+            file_date = date_from.replace('/', '-')
+            static_time = f"{date_from} | {now.strftime('%H:%M')}"
 
     # --- BƯỚC LỌC 1: CHỈ GIỮ OUTGOING — XÓA THẲNG MỌI DÒNG INCOMING ---
     n_incoming = 0
@@ -217,25 +316,49 @@ if uploaded_file:
         )
 
     st.session_state['active_staff'] = active_staff
+
+    # --- LIÊN KẾT GOOGLE SHEET: 1 ngày -> Chốt/OFF/Số P; nhiều ngày -> cộng dồn Chốt ---
+    _gs = st.session_state.get("gsheet_url", "").strip()
+    if _gs and date_from:
+        _key = (date_from, date_to, _gs)
+        if st.session_state.get("gs_synced") != _key:
+            _n = gsheet_apply(_gs, date_from, date_to)
+            st.session_state["gs_synced"] = _key
+            st.session_state["gs_synced_n"] = _n
+        _n = st.session_state.get("gs_synced_n", 0)
+        if _n >= 0:
+            _lbl = (f"{date_from}→{date_to} (cộng dồn Chốt)" if is_range else f"ngày {date_from}")
+            st.sidebar.caption(f"🔗 Google Sheet: đã nạp {_n} dòng — {_lbl}")
+
     current_input_display = st.session_state.input_df.loc[active_staff]
 
     # --- TÍNH TOÁN (chạy chung cho cả 2 trang) ---
     final_df = pd.concat([current_input_display, stats], axis=1).fillna(0).reset_index()
     final_df.rename(columns={'index': 'Sales Name'}, inplace=True)
 
+    _days_mult = n_days if (is_range and n_days > 0) else 1
     def calculate_metrics(row):
         name = row['Sales Name']; lvl = STAFF_CONFIG.get(name, "Probation")
-        target_orig = LEVEL_TARGETS.get(lvl, 9000); actual = row['Actual_Sec']
-        giam_p = float(row['Giảm số P'])                       # phút — hiển thị riêng + cộng vào Total
+        target_orig = LEVEL_TARGETS.get(lvl, 9000) * _days_mult   # theo THÁNG: mục tiêu × số ngày
+        actual = row['Actual_Sec']
+        giam_p = float(row['Giảm số P'])
         if row['Xin OFF']:
             return pd.Series([lvl, target_orig, giam_p, actual, actual, 0.0, "OFF"])
         sales = row['Chốt $']
         if name in NO_DATA_SET and sales == 0:
             return pd.Series([lvl, target_orig, giam_p, 0, 0, 0.0, "NO DATA"])
+        if is_range:
+            # THEO THÁNG: goal = 2h30 × số ngày; Chốt chỉ hiển thị (không trừ bonus, không Giảm P)
+            goal = target_orig
+            total = actual
+            pct = 100.0 if goal <= 0 else total / goal * 100
+            return pd.Series([lvl, goal, 0.0, actual, total, round(float(pct), 1),
+                              "GOOD JOB" if pct >= 100 else "COME ON!"])
+        # --- 1 NGÀY: rule cũ (bonus theo Chốt, +Giảm P vào Total) ---
         is_done = sales >= 2000
         bonus = 1800 if 300 <= sales < 500 else (2700 if 500 <= sales < 1000 else (5400 if 1000 <= sales < 2000 else 0))
-        goal = 0 if is_done else max(0, target_orig - bonus)   # GOAL: trừ bonus (rule cũ), KHÔNG trừ Giảm số P
-        total = actual + giam_p * 60                            # Total = talktime + Giảm số P
+        goal = 0 if is_done else max(0, target_orig - bonus)
+        total = actual + giam_p * 60
         pct = 100.0 if (is_done or goal <= 0) else total / goal * 100
         return pd.Series([lvl, goal, giam_p, actual, total, round(float(pct), 1),
                           "GOOD JOB" if (pct >= 100 or is_done) else "COME ON!"])
@@ -400,7 +523,7 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
                 border:1px solid #CBD8EC; border-radius:10px; padding:9px 15px; font-weight:600;
                 font-size:14px; cursor:pointer; box-shadow:0 2px 6px rgba(30,58,138,.12); }}
       .fsbtn:hover {{ background:#EEF4FF; }}
-      .title {{ background:linear-gradient(135deg,#6E8FBE,#8AA7CE); color:#fff; text-align:center;
+      .title {{ background:linear-gradient(135deg,#0F2A5B,#1E40AF); color:#fff; text-align:center;
                 font-weight:700; font-size:26px; padding:18px; border-radius:14px; letter-spacing:.3px; }}
       .kpis {{ display:flex; gap:14px; margin:16px 0; flex-wrap:wrap; }}
       .kpi {{ flex:1; min-width:168px; text-align:center; background:#fff; border:1px solid #E6ECF5;
