@@ -386,17 +386,17 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
                   align-items:center;justify-content:center;font-size:23px; }}
       .kpi .lb {{ font-size:14px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:#6B7A90; }}
       .kpi .vl {{ font-size:34px;font-weight:900;color:#12326B; }}
-      table {{ width:auto; margin:0 auto; border-collapse:separate; border-spacing:0 6px; }}
-      th {{ font-size:17px; font-weight:900; color:#3A4A63; text-align:center; padding:8px 8px;
+      table {{ width:100%; border-collapse:separate; border-spacing:0 6px; }}
+      th {{ font-size:15px; font-weight:900; color:#3A4A63; text-align:center; padding:7px 5px;
             text-transform:uppercase; letter-spacing:.2px; }}
-      td {{ font-size:18px; font-weight:800; text-align:center; padding:10px 8px; background:#fff; color:#1F2A44; }}
+      td {{ font-size:15px; font-weight:800; text-align:center; padding:8px 5px; background:#fff; color:#1F2A44; }}
       tr td:first-child {{ border-radius:12px 0 0 12px; }}
       tr td:last-child  {{ border-radius:0 12px 12px 0; }}
       tr.nod td {{ background:#F3F6FB; color:#9AA6B8; font-weight:700; }}
-      tr.tot td {{ background:#33507A; color:#fff; font-weight:900; font-size:19px; }}
-      .pbar {{ position:relative; height:26px; background:#EEF2F8; border-radius:8px; overflow:hidden; }}
+      tr.tot td {{ background:#33507A; color:#fff; font-weight:900; font-size:16px; }}
+      .pbar {{ position:relative; height:22px; background:#EEF2F8; border-radius:7px; overflow:hidden; }}
       .pfill {{ position:absolute; left:0; top:0; bottom:0; }}
-      .pbar span {{ position:relative; z-index:2; line-height:26px; font-weight:900; color:#22314A; font-size:15px; }}
+      .pbar span {{ position:relative; z-index:2; line-height:22px; font-weight:900; color:#22314A; font-size:13px; }}
       .badge {{ border-radius:10px; font-weight:900; }}
       .okb {{ background:#DCFCE7; color:#166534; }}
       .cmb {{ background:#FEE2E2; color:#B91C1C; }}
