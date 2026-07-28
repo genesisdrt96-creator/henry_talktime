@@ -290,25 +290,44 @@ if uploaded_file:
 
     df_raw['Ext_Name'] = df_raw['Extension'].str.split(' - ', n=1).str[1].fillna("Unknown")
     df_raw['Sec'] = df_raw['Duration'].apply(to_seconds)
-    # LƯU Ý: GIỮ cả leg ngắn (< 20s) theo yêu cầu — không lọc blip, không merge overlap.
+    # Dựng mốc thời gian để phát hiện các cuộc CHỒNG NHAU (chuỗi transfer / kết nối Agent).
+    # Time chỉ có độ phân giải PHÚT -> đủ để bắt các leg cùng một cuộc.
+    df_raw['Start'] = pd.to_datetime(
+        df_raw['Date'].astype(str).str.strip() + ' ' + df_raw['Time'].astype(str).str.strip(),
+        format='%a %m/%d/%Y %I:%M %p', errors='coerce')
+    df_raw = df_raw.dropna(subset=['Start'])
+    df_raw['End'] = df_raw['Start'] + pd.to_timedelta(df_raw['Sec'], unit='s')
 
     # BÁO CÁO TẤT CẢ nhân viên theo đúng thứ tự STAFF_LIST (không lọc bỏ ai).
-    # Người không xuất hiện trong file RingCentral -> nhóm "không có data" (ghi chú).
     active_in_file = df_raw['Ext_Name'].unique()
-    active_staff = list(STAFF_LIST)                       # thứ tự report cố định
+    active_staff = list(STAFF_LIST)
     no_data_staff = [n for n in active_staff if n not in active_in_file]
     NO_DATA_SET = set(no_data_staff)
 
+    # DEDUP CHỒNG THỜI GIAN: gom các cuộc chồng nhau thành 1 cụm, CHỈ lấy cuộc dài nhất mỗi cụm.
+    # -> talktime = tổng (cuộc dài nhất mỗi cụm); số cuộc = số cụm; milestone tính trên cuộc dài nhất.
+    def _dedup_overlap(g):
+        g = g.sort_values('Start')
+        maxes, ce, cur = [], None, 0
+        for s, e, sec in zip(g['Start'], g['End'], g['Sec']):
+            if ce is None or s > ce:            # cụm mới (không chồng cụm trước)
+                if ce is not None: maxes.append(cur)
+                ce, cur = e, sec
+            else:                                # chồng -> cùng cụm, giữ cuộc DÀI NHẤT
+                ce = max(ce, e); cur = max(cur, sec)
+        if ce is not None: maxes.append(cur)
+        ss = pd.Series(maxes, dtype=float)
+        return pd.Series({
+            'Actual_Sec': float(ss.sum()),
+            'Tong_Cuoc_Goi': int(len(ss)),
+            'Int_5p':  int((ss >= 300).sum()),
+            'Int_10p': int((ss >= 600).sum()),
+            'Int_30p': int((ss >= 1800).sum()),
+        })
+
     df_active = df_raw[df_raw['Ext_Name'].isin(active_staff)]
     if len(df_active):
-        # TALKTIME = TỔNG duration các leg Voice còn lại (cộng thẳng, không union).
-        stats = df_active.groupby('Ext_Name').agg(
-            Actual_Sec=('Sec', 'sum'),
-            Tong_Cuoc_Goi=('Sec', 'count'),
-            Int_5p=('Sec', lambda x: int((x >= 300).sum())),
-            Int_10p=('Sec', lambda x: int((x >= 600).sum())),
-            Int_30p=('Sec', lambda x: int((x >= 1800).sum())),
-        ).reindex(active_staff).fillna(0)
+        stats = df_active.groupby('Ext_Name').apply(_dedup_overlap).reindex(active_staff).fillna(0)
     else:
         stats = pd.DataFrame(
             0, index=active_staff,
