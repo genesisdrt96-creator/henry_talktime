@@ -49,7 +49,7 @@ st.markdown("""
     .kpi-sub   { font-size:14px; font-weight:700; color:#3B82F6; margin-top:2px; }
     [data-testid="stDataFrame"] td, [data-testid="stDataFrame"] th {
         border: none !important; color: #0f172a !important;
-        font-weight: 900 !important; font-size: 12px !important; padding: 6px 6px !important;
+        font-weight: 900 !important; font-size: 16px !important; padding: 11px !important;
     }
     /* Tiêu đề điều hướng trong sidebar */
     .nav-title {
@@ -249,7 +249,7 @@ if uploaded_file and page == "📝 Nhập doanh số & Điều chỉnh":
 
 # ==================== TRANG 2: BÁO CÁO ====================
 if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
-    st.markdown(f'<div class="main-header">🏆 WORKING RESULTS STATISTICS | {static_time} (EST)</div>', unsafe_allow_html=True)
+    # (Tiêu đề + KPI được hiển thị trong khối bảng HTML bên dưới — không lặp lại ở đây)
     t_p = int(final_df['Chốt $'].sum())
     t_t = format_time(final_df['Actual_Sec'].sum())
     t_c = int(final_df['Tong_Cuoc_Goi'].sum())
@@ -257,18 +257,6 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
     team_pct = round(_valid['actual_val'].sum() / _valid['target_val'].sum() * 100, 1) if _valid['target_val'].sum() > 0 else 0.0
     n_done = int((final_df['📊 RESULT'] == "GOOD JOB").sum())
     n_active = int(len(_valid))
-    st.markdown(f"""<div class="kpi-row">
-        <div class="kpi-card"><div class="kpi-ico" style="background:#F59E0B33;">💰</div>
-            <div class="kpi-label">Total Premium</div><div class="kpi-value">${t_p:,}</div></div>
-        <div class="kpi-card"><div class="kpi-ico" style="background:#38BDF833;">⏱️</div>
-            <div class="kpi-label">Total Talktime</div><div class="kpi-value">{t_t}</div></div>
-        <div class="kpi-card"><div class="kpi-ico" style="background:#818CF833;">📞</div>
-            <div class="kpi-label">Outgoing Calls</div><div class="kpi-value">{t_c:,}</div></div>
-        <div class="kpi-card"><div class="kpi-ico" style="background:#34D39933;">✅</div>
-            <div class="kpi-label">Team hoàn thành</div><div class="kpi-value">{team_pct:.1f}%</div></div>
-        <div class="kpi-card"><div class="kpi-ico" style="background:#FBBF2433;">🏆</div>
-            <div class="kpi-label">Đạt mục tiêu</div><div class="kpi-value">{n_done}<span style="font-size:16px;color:#93C5FD;">/{n_active}</span></div></div>
-    </div>""", unsafe_allow_html=True)
 
     # --- 8. BẢNG HIỂN THỊ ---
     disp_df = pd.DataFrame()
@@ -309,37 +297,7 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
         '📊 RESULT': '',
     }
     disp_df = pd.concat([disp_df, pd.DataFrame([total_row])], ignore_index=True)
-
-    # Vị trí cột (0-index): 0 SALES,1 LVL,2 CHỐT,3 GOAL,4 CALL,5 QUYĐỔI,6 GIẢM,7 %,8 5P,9 10P,10 30P,11 RESULT
-    def apply_row_styles(row):
-        styles = [''] * len(row); idx = row.name
-        if idx >= len(final_df):
-            return ['background-color: #050E3C; color: #ffffff; font-weight: 900; font-size: 16px;'] * len(row)
-        r = final_df.iloc[idx]
-        res = r['📊 RESULT']
-        if res == "NO DATA":
-            return ['background-color: #F8FAFC; color: #94A3B8; font-weight: 700;'] * len(row)
-        lvl = r['🏅 LVL']
-        if lvl in LEVEL_COLORS:
-            styles[1] = f'background-color: {LEVEL_COLORS[lvl]}; color: {LEVEL_TEXT[lvl]}; font-weight: 900;'
-        if r['Chốt $'] > 0:
-            styles[2] = 'background-color: #FEF3C7; color: #92400E; font-weight: 900;'
-        if r['actual_val'] >= r['target_val'] and r['target_val'] > 0:
-            styles[4] = 'background-color: #DCFCE7; color: #15803D; font-weight: 900;'
-        # Cột QUY ĐỔI: đạt mốc 2h30 (9000s) -> xanh lá
-        if r['effective_sec'] >= 9000 or r['red_val'] >= 9000:
-            styles[5] = 'background-color: #DCFCE7; color: #15803D; font-weight: 900;'
-        pct = r['pct_val']
-        if pct >= 100:   styles[7] = 'background-color: #DCFCE7; color: #15803D; font-weight: 900;'
-        elif pct >= 70:  styles[7] = 'background-color: #FEF3C7; color: #B45309; font-weight: 900;'
-        else:            styles[7] = 'background-color: #FEE2E2; color: #B91C1C; font-weight: 900;'
-        if res == "GOOD JOB": styles[11] = 'background-color: #DCFCE7; color: #166534; font-weight: 900;'
-        elif res == "OFF":    styles[11] = 'background-color: #E2E8F0; color: #475569; font-weight: 900;'
-        else:                 styles[11] = 'background-color: #FEE2E2; color: #B91C1C; font-weight: 900;'
-        return styles
-
-    st.dataframe(disp_df.style.apply(apply_row_styles, axis=1), use_container_width=True, hide_index=True, height=((len(active_staff)+1)*38+50),
-        column_config={"💵 CHỐT $": st.column_config.NumberColumn(format="$%d"), "% HOÀN THÀNH": st.column_config.NumberColumn(format="%.0f%%")})
+    # (Bảng chính giờ là bảng HTML toàn cảnh bên dưới; disp_df vẫn dùng để export CSV.)
 
     # --- GHI CHÚ: nhân viên không có dữ liệu talktime ---
     if no_data_staff:
@@ -428,17 +386,17 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
                   align-items:center;justify-content:center;font-size:23px; }}
       .kpi .lb {{ font-size:14px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:#6B7A90; }}
       .kpi .vl {{ font-size:34px;font-weight:900;color:#12326B; }}
-      table {{ width:auto; margin:0 auto; border-collapse:separate; border-spacing:0 5px; }}
-      th {{ font-size:12px; font-weight:900; color:#3A4A63; text-align:center; padding:6px 4px;
+      table {{ width:auto; margin:0 auto; border-collapse:separate; border-spacing:0 6px; }}
+      th {{ font-size:17px; font-weight:900; color:#3A4A63; text-align:center; padding:8px 8px;
             text-transform:uppercase; letter-spacing:.2px; }}
-      td {{ font-size:15px; font-weight:800; text-align:center; padding:9px 5px; background:#fff; color:#1F2A44; }}
+      td {{ font-size:18px; font-weight:800; text-align:center; padding:10px 8px; background:#fff; color:#1F2A44; }}
       tr td:first-child {{ border-radius:12px 0 0 12px; }}
       tr td:last-child  {{ border-radius:0 12px 12px 0; }}
       tr.nod td {{ background:#F3F6FB; color:#9AA6B8; font-weight:700; }}
-      tr.tot td {{ background:#33507A; color:#fff; font-weight:900; font-size:16px; }}
-      .pbar {{ position:relative; height:23px; background:#EEF2F8; border-radius:7px; overflow:hidden; }}
+      tr.tot td {{ background:#33507A; color:#fff; font-weight:900; font-size:19px; }}
+      .pbar {{ position:relative; height:26px; background:#EEF2F8; border-radius:8px; overflow:hidden; }}
       .pfill {{ position:absolute; left:0; top:0; bottom:0; }}
-      .pbar span {{ position:relative; z-index:2; line-height:23px; font-weight:900; color:#22314A; font-size:13px; }}
+      .pbar span {{ position:relative; z-index:2; line-height:26px; font-weight:900; color:#22314A; font-size:15px; }}
       .badge {{ border-radius:10px; font-weight:900; }}
       .okb {{ background:#DCFCE7; color:#166534; }}
       .cmb {{ background:#FEE2E2; color:#B91C1C; }}
@@ -455,8 +413,8 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
     </script>
     """
 
-    with st.expander("🖥️ Xem bảng TOÀN MÀN HÌNH (tiêu đề + KPI + bảng cùng lúc)", expanded=False):
-        components.html(full_html, height=box_h, scrolling=True)
+    st.markdown("#### 📋 Bảng kết quả")
+    components.html(full_html, height=box_h, scrolling=True)
 
     # --- COPY CỘT % ĐỂ DÁN SANG GOOGLE SHEET ---
     with st.expander("📋 Copy cột '% HOÀN THÀNH' để dán sang Google Sheet"):
