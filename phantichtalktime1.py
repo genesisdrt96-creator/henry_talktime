@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
@@ -30,28 +31,22 @@ st.markdown("""
     }
     .metric-title { color: #000000; font-size: 13px; font-weight: 900; margin-bottom: -2px; text-transform: uppercase; }
     .metric-value { color: #000000; font-size: 28px; font-weight: 900; line-height: 1.2; }
-    /* ===== KPI CARDS (modern, dark) ===== */
+    /* ===== KPI CARDS (tông NHẠT, căn giữa, chữ to) ===== */
     .kpi-row { display: flex; gap: 14px; margin: 4px 0 18px 0; flex-wrap: wrap; }
     .kpi-card {
-        flex: 1; min-width: 150px;
-        background: linear-gradient(155deg, #0B1437 0%, #1e3a8a 100%);
-        border-radius: 18px; padding: 16px 18px; color: #fff;
-        box-shadow: 0 10px 24px rgba(11,20,55,0.28);
-        border: 1px solid rgba(255,255,255,0.06);
-        position: relative; overflow: hidden;
-    }
-    .kpi-card::after {
-        content:""; position:absolute; right:-30px; top:-30px;
-        width:110px; height:110px; border-radius:50%;
-        background: rgba(255,255,255,0.05);
+        flex: 1; min-width: 168px; text-align: center;
+        background: #FFFFFF;
+        border-radius: 18px; padding: 18px 16px;
+        box-shadow: 0 6px 18px rgba(30,58,138,0.07);
+        border: 1px solid #E6ECF5;
     }
     .kpi-ico {
-        width:40px; height:40px; border-radius:12px; display:flex;
-        align-items:center; justify-content:center; font-size:20px; margin-bottom:10px;
+        width:48px; height:48px; border-radius:14px; display:flex;
+        align-items:center; justify-content:center; font-size:23px; margin:0 auto 10px auto;
     }
-    .kpi-label { font-size:12px; font-weight:800; letter-spacing:.6px; text-transform:uppercase; color:#AEC0E8; }
-    .kpi-value { font-size:30px; font-weight:900; line-height:1.15; margin-top:2px; }
-    .kpi-sub   { font-size:12px; font-weight:700; color:#93C5FD; margin-top:4px; }
+    .kpi-label { font-size:14px; font-weight:800; letter-spacing:.5px; text-transform:uppercase; color:#64748B; }
+    .kpi-value { font-size:36px; font-weight:900; line-height:1.15; margin-top:4px; color:#12326B; }
+    .kpi-sub   { font-size:14px; font-weight:700; color:#3B82F6; margin-top:2px; }
     [data-testid="stDataFrame"] td, [data-testid="stDataFrame"] th {
         border: none !important; color: #0f172a !important;
         font-weight: 900 !important; font-size: 16px !important; padding: 11px !important;
@@ -349,6 +344,119 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
     # --- GHI CHÚ: nhân viên không có dữ liệu talktime ---
     if no_data_staff:
         st.warning(f"📝 **Không có dữ liệu talktime ({len(no_data_staff)}):** " + " • ".join(no_data_staff))
+
+    # ================= CHẾ ĐỘ TOÀN MÀN HÌNH (tiêu đề + KPI + bảng cùng lúc) =================
+    def _bar(pct, label, fill="#8FB0D6"):
+        p = max(0, min(pct, 100))
+        return (f'<div class="pbar"><div class="pfill" style="width:{p:.0f}%;background:{fill};"></div>'
+                f'<span>{label}</span></div>')
+
+    rows_html = ""
+    for _, r in final_df.iterrows():
+        res = r['📊 RESULT']; lvl = r['🏅 LVL']
+        if res == "NO DATA":
+            rows_html += (f'<tr class="nod"><td>{r["Sales Name"]}</td><td>{lvl}</td>'
+                          f'<td>—</td><td>—</td><td>—</td><td>—</td><td>—</td>'
+                          f'<td>{int(r["Int_5p"])}</td><td>{int(r["Int_10p"])}</td><td>{int(r["Int_30p"])}</td>'
+                          f'<td class="badge nodb">NO DATA</td></tr>')
+            continue
+        lvl_bg = LEVEL_COLORS.get(lvl, "#FFFFFF"); lvl_tx = LEVEL_TEXT.get(lvl, "#12326B")
+        chot = f"${int(r['Chốt $']):,}" if r['Chốt $'] > 0 else "$0"
+        chot_style = 'style="background:#FEF3C7;color:#92400E;"' if r['Chốt $'] > 0 else ''
+        eff_bar = _bar(r['effective_sec'] / 9000 * 100, format_time(r['effective_sec']))
+        pct_bar = _bar(r['pct_val'], f"{r['pct_val']:.0f}%")
+        if res == "GOOD JOB": badge = '<td class="badge okb">GOOD JOB</td>'
+        elif res == "OFF":    badge = '<td class="badge offb">OFF</td>'
+        else:                 badge = '<td class="badge cmb">Come on!</td>'
+        rows_html += (f'<tr><td>{r["Sales Name"]}</td>'
+                      f'<td style="background:{lvl_bg};color:{lvl_tx};">{lvl}</td>'
+                      f'<td {chot_style}>{chot}</td>'
+                      f'<td>{format_time(r["target_val"])}</td>'
+                      f'<td>{format_time(r["actual_val"])}</td>'
+                      f'<td>{eff_bar}</td><td>{pct_bar}</td>'
+                      f'<td>{int(r["Int_5p"])}</td><td>{int(r["Int_10p"])}</td><td>{int(r["Int_30p"])}</td>'
+                      f'{badge}</tr>')
+    # hàng tổng
+    rows_html += (f'<tr class="tot"><td>TOTAL</td><td></td>'
+                  f'<td>${int(final_df["Chốt $"].sum()):,}</td>'
+                  f'<td>{format_time(tot_target)}</td>'
+                  f'<td>{format_time(final_df["actual_val"].sum())}</td>'
+                  f'<td>{format_time(valid["effective_sec"].sum())}</td>'
+                  f'<td>{tot_pct:.0f}%</td>'
+                  f'<td>{int(final_df["Int_5p"].sum())}</td><td>{int(final_df["Int_10p"].sum())}</td>'
+                  f'<td>{int(final_df["Int_30p"].sum())}</td><td></td></tr>')
+
+    kpi_html = f"""
+      <div class="kpis">
+        <div class="kpi"><div class="ic" style="background:#FEF0D6;">💰</div><div class="lb">Total Premium</div><div class="vl">${t_p:,}</div></div>
+        <div class="kpi"><div class="ic" style="background:#D9F0FB;">⏱️</div><div class="lb">Total Talktime</div><div class="vl">{t_t}</div></div>
+        <div class="kpi"><div class="ic" style="background:#E4E7FB;">📞</div><div class="lb">Outgoing Calls</div><div class="vl">{t_c:,}</div></div>
+        <div class="kpi"><div class="ic" style="background:#D6F5E5;">✅</div><div class="lb">Team hoàn thành</div><div class="vl">{team_pct:.0f}%</div></div>
+        <div class="kpi"><div class="ic" style="background:#FCEFCF;">🏆</div><div class="lb">Đạt mục tiêu</div><div class="vl">{n_done}<span style="font-size:20px;color:#94A3B8;">/{n_active}</span></div></div>
+      </div>"""
+
+    n_rows = len(final_df) + 1
+    box_h = 250 + n_rows * 52 + 80
+    full_html = f"""
+    <div id="reportBox" class="wrap">
+      <button class="fsbtn" onclick="goFS()">⛶ Toàn màn hình</button>
+      <div class="title">🏆 WORKING RESULTS STATISTICS | {static_time} (EST)</div>
+      {kpi_html}
+      <table>
+        <thead><tr>
+          <th>SALES</th><th>LVL</th><th>CHỐT $</th><th>GOAL</th><th>CALL</th>
+          <th>QUY ĐỔI</th><th>% HOÀN THÀNH</th><th>5P</th><th>10P</th><th>30P</th><th>RESULT</th>
+        </tr></thead>
+        <tbody>{rows_html}</tbody>
+      </table>
+    </div>
+    <style>
+      * {{ box-sizing:border-box; font-family:'Segoe UI',Roboto,Arial,sans-serif; }}
+      body {{ margin:0; }}
+      .wrap {{ padding:16px; background:#F6F9FF; position:relative; }}
+      #reportBox:fullscreen {{ overflow:auto; }}
+      .fsbtn {{ position:absolute; right:18px; top:18px; z-index:9; background:#fff; color:#33507A;
+                border:1px solid #CBD8EC; border-radius:10px; padding:9px 15px; font-weight:800;
+                font-size:14px; cursor:pointer; box-shadow:0 2px 6px rgba(30,58,138,.12); }}
+      .fsbtn:hover {{ background:#EEF4FF; }}
+      .title {{ background:linear-gradient(135deg,#6E8FBE,#8AA7CE); color:#fff; text-align:center;
+                font-weight:900; font-size:25px; padding:18px; border-radius:14px; letter-spacing:.3px; }}
+      .kpis {{ display:flex; gap:14px; margin:16px 0; flex-wrap:wrap; }}
+      .kpi {{ flex:1; min-width:168px; text-align:center; background:#fff; border:1px solid #E6ECF5;
+              border-radius:16px; padding:16px; box-shadow:0 6px 16px rgba(30,58,138,.07); }}
+      .kpi .ic {{ width:48px;height:48px;border-radius:14px;margin:0 auto 8px;display:flex;
+                  align-items:center;justify-content:center;font-size:23px; }}
+      .kpi .lb {{ font-size:14px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:#6B7A90; }}
+      .kpi .vl {{ font-size:34px;font-weight:900;color:#12326B; }}
+      table {{ width:100%; border-collapse:separate; border-spacing:0 7px; }}
+      th {{ font-size:15px; font-weight:900; color:#3A4A63; text-align:center; padding:8px 6px;
+            text-transform:uppercase; letter-spacing:.3px; }}
+      td {{ font-size:20px; font-weight:800; text-align:center; padding:13px 8px; background:#fff; color:#1F2A44; }}
+      tr td:first-child {{ border-radius:12px 0 0 12px; }}
+      tr td:last-child  {{ border-radius:0 12px 12px 0; }}
+      tr.nod td {{ background:#F3F6FB; color:#9AA6B8; font-weight:700; }}
+      tr.tot td {{ background:#33507A; color:#fff; font-weight:900; font-size:21px; }}
+      .pbar {{ position:relative; height:30px; background:#EEF2F8; border-radius:9px; overflow:hidden; }}
+      .pfill {{ position:absolute; left:0; top:0; bottom:0; }}
+      .pbar span {{ position:relative; z-index:2; line-height:30px; font-weight:900; color:#22314A; font-size:16px; }}
+      .badge {{ border-radius:10px; font-weight:900; }}
+      .okb {{ background:#DCFCE7; color:#166534; }}
+      .cmb {{ background:#FEE2E2; color:#B91C1C; }}
+      .offb {{ background:#E2E8F0; color:#475569; }}
+      .nodb {{ background:#EEF2F8; color:#94A3B8; }}
+    </style>
+    <script>
+      function goFS() {{
+        var el = document.getElementById('reportBox');
+        var rq = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen;
+        if (rq) {{ rq.call(el).catch(function(){{ alert('Trình duyệt chặn toàn màn hình trong khung này. Hãy nhấn F11 để phóng to cả trang.'); }}); }}
+        else {{ alert('Trình duyệt không hỗ trợ. Hãy nhấn F11.'); }}
+      }}
+    </script>
+    """
+
+    with st.expander("🖥️ Xem bảng TOÀN MÀN HÌNH (tiêu đề + KPI + bảng cùng lúc)", expanded=False):
+        components.html(full_html, height=box_h, scrolling=True)
 
     # --- COPY CỘT % ĐỂ DÁN SANG GOOGLE SHEET ---
     with st.expander("📋 Copy cột '% HOÀN THÀNH' để dán sang Google Sheet"):
