@@ -550,18 +550,18 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
       .kpi .ic {{ width:48px;height:48px;border-radius:14px;margin:0 auto 8px;display:flex;
                   align-items:center;justify-content:center;font-size:23px; }}
       .kpi .lb {{ font-size:14px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:#7A8AA0; }}
-      .kpi .vl {{ font-size:35px;font-weight:700;color:#1B3B72; }}
+      .kpi .vl {{ font-size:35px;font-weight:800;color:#1B3B72; }}
       table {{ width:100%; border-collapse:separate; border-spacing:0 6px; }}
-      th {{ font-size:16px; font-weight:600; color:#5A6B85; text-align:center; padding:7px 5px;
+      th {{ font-size:16px; font-weight:700; color:#5A6B85; text-align:center; padding:7px 5px;
             text-transform:uppercase; letter-spacing:.2px; }}
-      td {{ font-size:16px; font-weight:500; text-align:center; padding:9px 5px; background:#fff; color:#3A4658; }}
+      td {{ font-size:16px; font-weight:600; text-align:center; padding:9px 5px; background:#fff; color:#33415A; }}
       tr td:first-child {{ border-radius:12px 0 0 12px; }}
       tr td:last-child  {{ border-radius:0 12px 12px 0; }}
       tr.nod td {{ background:#F3F6FB; color:#AEB8C6; font-weight:500; }}
-      tr.tot td {{ background:#33507A; color:#fff; font-weight:700; font-size:17px; }}
+      tr.tot td {{ background:#33507A; color:#fff; font-weight:800; font-size:17px; }}
       .pbar {{ position:relative; height:22px; background:#EEF2F8; border-radius:7px; overflow:hidden; }}
       .pfill {{ position:absolute; left:0; top:0; bottom:0; }}
-      .pbar span {{ position:relative; z-index:2; line-height:22px; font-weight:600; font-size:14px; }}
+      .pbar span {{ position:relative; z-index:2; line-height:22px; font-weight:700; font-size:14px; }}
       .badge {{ border-radius:10px; font-weight:900; }}
       .okb {{ background:#DCFCE7; color:#166534; }}
       .cmb {{ background:#FEE2E2; color:#B91C1C; }}
