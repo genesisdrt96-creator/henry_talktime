@@ -17,11 +17,15 @@ file_date = now.strftime("%m-%d-%Y")
 
 st.markdown("""
     <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+    html, body, .stApp, [data-testid="stAppViewContainer"], [class*="css"] {
+        font-family: 'Inter','Segoe UI',Roboto,Arial,sans-serif !important;
+    }
     .stApp { background-color: #f8fafc; }
     .main-header {
         background: linear-gradient(135deg, #050E3C 0%, #1e3a8a 100%);
         color: white; padding: 16px; border-radius: 12px;
-        text-align: center; font-weight: 900; font-size: 24px; margin-bottom: 15px;
+        text-align: center; font-weight: 700; font-size: 25px; margin-bottom: 15px;
         letter-spacing: 0.3px;
     }
     .metric-container { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 15px; }
@@ -304,10 +308,14 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
         st.warning(f"📝 **Không có dữ liệu talktime ({len(no_data_staff)}):** " + " • ".join(no_data_staff))
 
     # ================= CHẾ ĐỘ TOÀN MÀN HÌNH (tiêu đề + KPI + bảng cùng lúc) =================
-    def _bar(pct, label, fill="#8FB0D6"):
+    def _bar(pct, label):
         p = max(0, min(pct, 100))
+        if pct >= 100:
+            fill, txt = "#EF4444", "#ffffff"       # ĐỎ khi đạt/vượt 100%
+        else:
+            fill, txt = "#FDE68A", "#7A5B00"       # VÀNG NHẠT khi chưa đạt
         return (f'<div class="pbar"><div class="pfill" style="width:{p:.0f}%;background:{fill};"></div>'
-                f'<span>{label}</span></div>')
+                f'<span style="color:{txt};">{label}</span></div>')
 
     rows_html = ""
     for _, r in final_df.iterrows():
@@ -369,34 +377,35 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
       </table>
     </div>
     <style>
-      * {{ box-sizing:border-box; font-family:'Segoe UI',Roboto,Arial,sans-serif; }}
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+      * {{ box-sizing:border-box; font-family:'Inter','Segoe UI',Roboto,Arial,sans-serif; }}
       body {{ margin:0; }}
       .wrap {{ padding:16px; background:#F6F9FF; position:relative; }}
       #reportBox:fullscreen {{ overflow:auto; }}
       .fsbtn {{ position:absolute; right:18px; top:18px; z-index:9; background:#fff; color:#33507A;
-                border:1px solid #CBD8EC; border-radius:10px; padding:9px 15px; font-weight:800;
+                border:1px solid #CBD8EC; border-radius:10px; padding:9px 15px; font-weight:600;
                 font-size:14px; cursor:pointer; box-shadow:0 2px 6px rgba(30,58,138,.12); }}
       .fsbtn:hover {{ background:#EEF4FF; }}
       .title {{ background:linear-gradient(135deg,#6E8FBE,#8AA7CE); color:#fff; text-align:center;
-                font-weight:900; font-size:25px; padding:18px; border-radius:14px; letter-spacing:.3px; }}
+                font-weight:700; font-size:26px; padding:18px; border-radius:14px; letter-spacing:.3px; }}
       .kpis {{ display:flex; gap:14px; margin:16px 0; flex-wrap:wrap; }}
       .kpi {{ flex:1; min-width:168px; text-align:center; background:#fff; border:1px solid #E6ECF5;
               border-radius:16px; padding:16px; box-shadow:0 6px 16px rgba(30,58,138,.07); }}
       .kpi .ic {{ width:48px;height:48px;border-radius:14px;margin:0 auto 8px;display:flex;
                   align-items:center;justify-content:center;font-size:23px; }}
-      .kpi .lb {{ font-size:14px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:#6B7A90; }}
-      .kpi .vl {{ font-size:34px;font-weight:900;color:#12326B; }}
+      .kpi .lb {{ font-size:14px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:#7A8AA0; }}
+      .kpi .vl {{ font-size:35px;font-weight:700;color:#1B3B72; }}
       table {{ width:100%; border-collapse:separate; border-spacing:0 6px; }}
-      th {{ font-size:15px; font-weight:900; color:#3A4A63; text-align:center; padding:7px 5px;
+      th {{ font-size:16px; font-weight:600; color:#5A6B85; text-align:center; padding:7px 5px;
             text-transform:uppercase; letter-spacing:.2px; }}
-      td {{ font-size:15px; font-weight:800; text-align:center; padding:8px 5px; background:#fff; color:#1F2A44; }}
+      td {{ font-size:16px; font-weight:500; text-align:center; padding:9px 5px; background:#fff; color:#3A4658; }}
       tr td:first-child {{ border-radius:12px 0 0 12px; }}
       tr td:last-child  {{ border-radius:0 12px 12px 0; }}
-      tr.nod td {{ background:#F3F6FB; color:#9AA6B8; font-weight:700; }}
-      tr.tot td {{ background:#33507A; color:#fff; font-weight:900; font-size:16px; }}
+      tr.nod td {{ background:#F3F6FB; color:#AEB8C6; font-weight:500; }}
+      tr.tot td {{ background:#33507A; color:#fff; font-weight:700; font-size:17px; }}
       .pbar {{ position:relative; height:22px; background:#EEF2F8; border-radius:7px; overflow:hidden; }}
       .pfill {{ position:absolute; left:0; top:0; bottom:0; }}
-      .pbar span {{ position:relative; z-index:2; line-height:22px; font-weight:900; color:#22314A; font-size:13px; }}
+      .pbar span {{ position:relative; z-index:2; line-height:22px; font-weight:600; font-size:14px; }}
       .badge {{ border-radius:10px; font-weight:900; }}
       .okb {{ background:#DCFCE7; color:#166534; }}
       .cmb {{ background:#FEE2E2; color:#B91C1C; }}
