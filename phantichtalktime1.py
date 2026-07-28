@@ -179,14 +179,16 @@ if uploaded_file:
     else:
         st.warning("⚠️ Không tìm thấy cột 'Direction'. Vui lòng kiểm tra lại định dạng file.")
 
-    # --- BƯỚC LỌC 2: BỎ CALL TRANSFER (chỉ giữ Type == 'Voice') ---
-    # Dòng Transfer để trống cột Type -> bị loại. Đây là bước duy nhất chống trùng lặp:
-    # loại các dòng Transfer vốn sao y nguyên duration của cuộc gốc.
-    if 'Type' in df_raw.columns:
-        df_raw['Type'] = df_raw['Type'].astype(str).str.strip()
-        df_raw = df_raw[df_raw['Type'].str.lower() == 'voice']
+    # --- BƯỚC LỌC 2: BỎ CALL TRANSFER (lọc theo Action, KHÔNG theo Type) ---
+    # Sửa quan trọng: RingCentral đôi khi ghi cuộc VoIP Call thật nhưng để TRỐNG cột Type.
+    # Nếu lọc 'Type == Voice' sẽ vô tình bỏ mất các cuộc thật này (kể cả cuộc kết nối 5-7 phút).
+    # Chỉ cần loại đúng dòng Transfer (nguồn nhân bản duration) là đủ.
+    if 'Action' in df_raw.columns:
+        df_raw = df_raw[df_raw['Action'].astype(str).str.strip().str.lower() != 'transfer']
+    elif 'Type' in df_raw.columns:   # dự phòng nếu file không có cột Action
+        df_raw = df_raw[df_raw['Type'].astype(str).str.strip().str.lower() == 'voice']
     else:
-        st.warning("⚠️ Không tìm thấy cột 'Type'. Không thể lọc Transfer.")
+        st.warning("⚠️ Không tìm thấy cột 'Action' lẫn 'Type'. Không thể lọc Transfer.")
 
     df_raw['Ext_Name'] = df_raw['Extension'].str.split(' - ', n=1).str[1].fillna("Unknown")
     df_raw['Sec'] = df_raw['Duration'].apply(to_seconds)
