@@ -134,7 +134,7 @@ def extract_report_range(df):
     dto = pd.Timestamp(days[-1]).strftime('%m/%d/%Y')
     return (dfrom, dto, len(days))
 
-@st.cache_data(ttl=30, show_spinner=False)
+@st.cache_data(ttl=10, show_spinner=False)
 def _read_gsheet(url):
     return pd.read_csv(url)
 
@@ -216,21 +216,23 @@ st.sidebar.markdown("# 💎 Master Dashboard")
 uploaded_file = st.sidebar.file_uploader("📂 Tải file RingCentral", type=["csv"])
 
 # --- LIÊN KẾT GOOGLE SHEET NHẬP LIỆU (Chốt / OFF / Số P theo ngày) ---
-_default_gs = ""
+# Link CSV published mặc định (gắn cứng) — dữ liệu tự cập nhật gần realtime.
+DEFAULT_GSHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTv1WZPG26RYVV4p1e3CuTW59OcLH18udmg0FvE_IaNZn8B0S7Ki0TzD5ENxDbWolGL7y42kn7PsHcA/pub?output=csv"
+_default_gs = DEFAULT_GSHEET_URL
 try:
-    _default_gs = st.secrets.get("GSHEET_CSV_URL", "")
+    _default_gs = st.secrets.get("GSHEET_CSV_URL", DEFAULT_GSHEET_URL)
 except Exception:
-    _default_gs = ""
+    _default_gs = DEFAULT_GSHEET_URL
 with st.sidebar.expander("🔗 Google Sheet nhập liệu", expanded=False):
     gs_url = st.text_input("Link CSV published của Google Sheet",
                            value=st.session_state.get("gsheet_url", _default_gs),
-                           help="File > Share > Publish to web > chọn sheet > CSV, rồi dán link vào đây.")
+                           help="Đã gắn sẵn link. Đổi link khác thì dán vào đây.")
     st.session_state["gsheet_url"] = gs_url
     if st.button("🔄 Đồng bộ lại từ Google Sheet", use_container_width=True):
         st.session_state.pop("gs_synced", None)
         _read_gsheet.clear()
         st.rerun()
-    st.caption("Nhập Chốt/OFF/Số P theo ngày trên Google Sheet 1 lần — web tự liên kết theo ngày của file CSV.")
+    st.caption("Nhập Chốt/OFF/Số P theo NGÀY trên Google Sheet — web tự lấy đúng range ngày trong file CSV. Tự cập nhật ~10 giây/lần.")
 
 # Thư mục lưu dữ liệu Final theo ngày (nằm cạnh file .py)
 HISTORY_DIR = "history"
@@ -304,16 +306,18 @@ if uploaded_file:
     no_data_staff = [n for n in active_staff if n not in active_in_file]
     NO_DATA_SET = set(no_data_staff)
 
-    # DEDUP CHỒNG THỜI GIAN: gom các cuộc chồng nhau thành 1 cụm, CHỈ lấy cuộc dài nhất mỗi cụm.
-    # -> talktime = tổng (cuộc dài nhất mỗi cụm); số cuộc = số cụm; milestone tính trên cuộc dài nhất.
+    # DEDUP CHỒNG THỜI GIAN: chỉ gom khi 2 cuộc chồng nhau THỰC SỰ > 60 giây
+    # (vượt sai số làm tròn phút của cột Time). Chuỗi transfer chồng nhau nhiều phút -> gom;
+    # các cuộc nối tiếp chỉ "chồng" vài giây do làm tròn -> GIỮ RIÊNG (không mất cuộc thật).
+    OVERLAP_TOL = pd.Timedelta(seconds=60)
     def _dedup_overlap(g):
         g = g.sort_values('Start')
         maxes, ce, cur = [], None, 0
         for s, e, sec in zip(g['Start'], g['End'], g['Sec']):
-            if ce is None or s > ce:            # cụm mới (không chồng cụm trước)
+            if ce is None or s >= ce - OVERLAP_TOL:   # cụm mới (không chồng, hoặc chồng ≤60s do làm tròn)
                 if ce is not None: maxes.append(cur)
                 ce, cur = e, sec
-            else:                                # chồng -> cùng cụm, giữ cuộc DÀI NHẤT
+            else:                                      # chồng THỰC SỰ >60s -> cùng cuộc, lấy DÀI NHẤT
                 ce = max(ce, e); cur = max(cur, sec)
         if ce is not None: maxes.append(cur)
         ss = pd.Series(maxes, dtype=float)
@@ -336,15 +340,13 @@ if uploaded_file:
 
     st.session_state['active_staff'] = active_staff
 
-    # --- LIÊN KẾT GOOGLE SHEET: 1 ngày -> Chốt/OFF/Số P; nhiều ngày -> cộng dồn Chốt ---
+    # --- LIÊN KẾT GOOGLE SHEET (REALTIME): mỗi lần chạy tự lấy đúng range ngày ---
+    # 1 ngày -> Chốt/OFF/Số P; nhiều ngày -> cộng dồn Chốt. Đọc qua cache 10s.
     _gs = st.session_state.get("gsheet_url", "").strip()
     if _gs and date_from:
-        _key = (date_from, date_to, _gs)
-        if st.session_state.get("gs_synced") != _key:
-            _n = gsheet_apply(_gs, date_from, date_to)
-            st.session_state["gs_synced"] = _key
-            st.session_state["gs_synced_n"] = _n
-        _n = st.session_state.get("gs_synced_n", 0)
+        # reset về mặc định trước khi nạp -> phản ánh đúng cả khi Sheet bị xoá dòng
+        st.session_state.input_df.loc[active_staff, ['Chốt $', 'Xin OFF', 'Giảm số P']] = [0.0, False, 0.0]
+        _n = gsheet_apply(_gs, date_from, date_to)
         if _n >= 0:
             _lbl = (f"{date_from}→{date_to} (cộng dồn Chốt)" if is_range else f"ngày {date_from}")
             st.sidebar.caption(f"🔗 Google Sheet: đã nạp {_n} dòng — {_lbl}")
