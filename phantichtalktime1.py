@@ -131,7 +131,24 @@ def _read_gsheet(url):
 
 import re
 def _to_off(v):
+    if pd.isna(v): return False
     return str(v).strip().lower() in ('true', '1', 'x', 'off', 'yes', 'có', 'co')
+
+def _safe_num(v):
+    """Chuyển ô Sheet sang số; rỗng/NaN -> 0 (tránh bug `NaN or 0` = NaN)."""
+    n = pd.to_numeric(v, errors='coerce')
+    return 0.0 if pd.isna(n) else float(n)
+
+def _parse_ext_name(ext):
+    if pd.isna(ext): return "Unknown"
+    s = str(ext).strip()
+    if ' - ' not in s: return s
+    a, b = [p.strip() for p in s.split(' - ', 1)]
+    if a in STAFF_LIST: return a
+    if b in STAFF_LIST: return b
+    if re.match(r'^\d+$', a): return b
+    if re.match(r'^\d+$', b): return a
+    return b
 
 def gsheet_apply(url, date_from, date_to):
     """Nạp dữ liệu từ Google Sheet (published CSV). Tự nhận 2 format:
@@ -172,13 +189,12 @@ def gsheet_apply(url, date_from, date_to):
             for nm in sel['_nm'].unique():
                 if nm not in idf.index: continue
                 r = sel[sel['_nm'] == nm].iloc[-1]
-                if 'Chốt' in sel.columns and str(r.get('Chốt', '')).strip() not in ('', 'nan'):
-                    try: idf.loc[nm, 'Chốt $'] = float(r['Chốt'])
-                    except Exception: pass
-                if 'OFF' in sel.columns: idf.loc[nm, 'Xin OFF'] = _to_off(r.get('OFF', ''))
-                if 'Số P' in sel.columns and str(r.get('Số P', '')).strip() not in ('', 'nan'):
-                    try: idf.loc[nm, 'Giảm số P'] = float(r['Số P'])
-                    except Exception: pass
+                if 'Chốt' in sel.columns:
+                    idf.loc[nm, 'Chốt $'] = _safe_num(r.get('Chốt'))
+                if 'OFF' in sel.columns:
+                    idf.loc[nm, 'Xin OFF'] = _to_off(r.get('OFF'))
+                if 'Số P' in sel.columns:
+                    idf.loc[nm, 'Giảm số P'] = _safe_num(r.get('Số P'))
                 n += 1
         else:
             if 'Chốt' in sel.columns:
@@ -209,28 +225,29 @@ def gsheet_apply(url, date_from, date_to):
         return 0
     if single:
         days = [d0.day]
-    elif d0.month == d1.month:
-        days = list(range(d0.day, d1.day + 1))
     else:
-        days = sorted(daymap.keys())
+        # Duyệt từng ngày thực trong CSV (tránh cộng nhầm cả tháng khi range nhiều ngày)
+        days = []
+        cur = d0.normalize()
+        while cur <= d1.normalize():
+            if cur.day in daymap:
+                days.append(cur.day)
+            cur += pd.Timedelta(days=1)
     n = 0
     for _, row in g.iterrows():
         nm = str(row[name_col]).strip()
         if nm not in idf.index: continue
         if single:
             f = daymap.get(days[0], {})
-            if 'Chốt' in f and str(row.get(f['Chốt'], '')).strip() not in ('', 'nan'):
-                try: idf.loc[nm, 'Chốt $'] = float(row[f['Chốt']])
-                except Exception: pass
-            if 'OFF' in f: idf.loc[nm, 'Xin OFF'] = _to_off(row.get(f['OFF'], ''))
-            if 'Giảm' in f and str(row.get(f['Giảm'], '')).strip() not in ('', 'nan'):
-                try: idf.loc[nm, 'Giảm số P'] = float(row[f['Giảm']])
-                except Exception: pass
+            if 'Chốt' in f:
+                idf.loc[nm, 'Chốt $'] = _safe_num(row.get(f['Chốt']))
+            if 'OFF' in f:
+                idf.loc[nm, 'Xin OFF'] = _to_off(row.get(f['OFF']))
+            if 'Giảm' in f:
+                idf.loc[nm, 'Giảm số P'] = _safe_num(row.get(f['Giảm']))
         else:
-            tot = 0.0
-            for d in days:
-                col = daymap.get(d, {}).get('Chốt')
-                if col: tot += pd.to_numeric(row.get(col), errors='coerce') or 0
+            tot = sum(_safe_num(row.get(daymap.get(d, {}).get('Chốt'))) for d in days
+                      if daymap.get(d, {}).get('Chốt'))
             idf.loc[nm, 'Chốt $'] = float(tot)
         n += 1
     return n
@@ -330,7 +347,8 @@ if uploaded_file:
     else:
         df_raw['is_tr'] = False
 
-    df_raw['Ext_Name'] = df_raw['Extension'].str.split(' - ', n=1).str[1].fillna("Unknown")
+    # RingCentral: thường là "Ext - Tên" hoặc đôi khi "Tên - Ext"
+    df_raw['Ext_Name'] = df_raw['Extension'].apply(_parse_ext_name)
     df_raw['Sec'] = df_raw['Duration'].apply(to_seconds)
     df_raw['Start'] = pd.to_datetime(
         df_raw['Date'].astype(str).str.strip() + ' ' + df_raw['Time'].astype(str).str.strip(),
@@ -350,28 +368,48 @@ if uploaded_file:
     # - Cụm KHÔNG Transfer     = các cuộc gọi RIÊNG BIỆT (khác khách) -> CỘNG ĐỦ từng cuộc.
     # Dòng Transfer chỉ dùng để nhận diện, KHÔNG cộng duration.
     def _agg_calls(g):
+        """Tính talktime: Transfer = tín hiệu nối chuỗi (không cộng duration).
+        Cuộc chồng thời gian trong chuỗi transfer -> 1 cuộc (leg dài nhất).
+        Cuộc riêng (không transfer) -> cộng đủ từng cuộc."""
         g = g.sort_values('Start')
-        contribs, ce, voice, has_tr = [], None, [], False
+        contribs, session = [], None
+
         def _flush():
-            if voice:
-                if has_tr: contribs.append(max(voice))   # chuỗi transfer -> 1 cuộc (dài nhất)
-                else: contribs.extend(voice)             # cuộc riêng -> giữ đủ
-        for s, e, sec, istr in zip(g['Start'], g['End'], g['Sec'], g['is_tr']):
-            if ce is None or s > ce:                     # cụm mới
-                _flush(); voice, has_tr, ce = [], False, e
+            nonlocal session
+            if session and session['legs']:
+                if session['has_transfer']:
+                    contribs.append(max(session['legs']))
+                else:
+                    contribs.extend(session['legs'])
+            session = None
+
+        for s, e, sec, is_tr in zip(g['Start'], g['End'], g['Sec'], g['is_tr']):
+            if is_tr:
+                if session is None:
+                    session = {'legs': [], 'end': e, 'has_transfer': True, 'bridge': True}
+                else:
+                    session['has_transfer'] = True
+                    session['bridge'] = True
+                    session['end'] = max(session['end'], e)
+                continue
+            if session is None:
+                session = {'legs': [sec], 'end': e, 'has_transfer': False, 'bridge': False}
+            elif s <= session['end'] or session['bridge']:
+                session['legs'].append(sec)
+                session['end'] = max(session['end'], e)
+                session['bridge'] = False
             else:
-                ce = max(ce, e)
-            if istr: has_tr = True
-            else: voice.append(sec)
+                _flush()
+                session = {'legs': [sec], 'end': e, 'has_transfer': False, 'bridge': False}
         _flush()
+
         ss = pd.Series(contribs, dtype=float)
         return pd.Series({
             'Actual_Sec': float(ss.sum()),
             'Tong_Cuoc_Goi': int(len(ss)),
-            # Mốc RIÊNG BIỆT (không cộng dồn): 1 cuộc chỉ rơi vào ĐÚNG 1 mốc
-            'Int_5p':  int(((ss >= 300) & (ss < 600)).sum()),    # 5–<10 phút
-            'Int_10p': int(((ss >= 600) & (ss < 1800)).sum()),   # 10–<30 phút
-            'Int_30p': int((ss >= 1800).sum()),                  # ≥30 phút
+            'Int_5p':  int(((ss >= 300) & (ss < 600)).sum()),
+            'Int_10p': int(((ss >= 600) & (ss < 1800)).sum()),
+            'Int_30p': int((ss >= 1800).sum()),
         })
 
     df_active = df_raw[df_raw['Ext_Name'].isin(active_staff)]
