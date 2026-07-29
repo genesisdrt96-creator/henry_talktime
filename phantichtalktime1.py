@@ -28,13 +28,6 @@ st.markdown("""
         text-align: center; font-weight: 700; font-size: 25px; margin-bottom: 15px;
         letter-spacing: 0.3px;
     }
-    .metric-container { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 15px; }
-    .metric-box {
-        background-color: white; padding: 6px 12px; border-radius: 10px; flex: 1; text-align: center;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05); border: 1px solid #e2e8f0;
-    }
-    .metric-title { color: #000000; font-size: 13px; font-weight: 900; margin-bottom: -2px; text-transform: uppercase; }
-    .metric-value { color: #000000; font-size: 28px; font-weight: 900; line-height: 1.2; }
     /* ===== KPI CARDS (tông NHẠT, căn giữa, chữ to) ===== */
     .kpi-row { display: flex; gap: 14px; margin: 4px 0 18px 0; flex-wrap: wrap; }
     .kpi-card {
@@ -105,8 +98,6 @@ LEVEL_TARGETS = {"GOLD": 9000, "SILVER": 9000, "BRONZE": 9000, "Associated": 900
 LEVEL_COLORS = {"GOLD": "#FDE9B8", "SILVER": "#E4EAF1", "BRONZE": "#F1DAC4", "Associated": "#DAE6FB", "Probation": "#D2F0E1"}
 LEVEL_TEXT   = {"GOLD": "#8A6D0B", "SILVER": "#475569", "BRONZE": "#9A5A24", "Associated": "#1E40AF", "Probation": "#0F766E"}
 
-# Cuộc gọi ngắn hơn ngưỡng này coi là blip nối máy, không tính talktime
-REAL_TALK_MIN_SEC = 20
 
 def to_seconds(s):
     if pd.isna(s) or str(s).lower() == 'in progress' or s == '-': return 0
@@ -138,10 +129,16 @@ def extract_report_range(df):
 def _read_gsheet(url):
     return pd.read_csv(url)
 
+import re
+def _to_off(v):
+    return str(v).strip().lower() in ('true', '1', 'x', 'off', 'yes', 'có', 'co')
+
 def gsheet_apply(url, date_from, date_to):
-    """Nạp dữ liệu từ Google Sheet (published CSV).
-    - 1 ngày (date_from == date_to): đổ Chốt + OFF + Số P của ngày đó.
-    - Nhiều ngày (theo tháng): CỘNG DỒN Chốt cả khoảng (chỉ Chốt), bỏ OFF/Số P.
+    """Nạp dữ liệu từ Google Sheet (published CSV). Tự nhận 2 format:
+      • DỌC (cũ): cột Date, Sales Name, Chốt, OFF, Số P — mỗi dòng 1 người/ngày.
+      • NGANG (mới, theo tháng): hàng = tên Sales; cột = ngày, mỗi ngày có Chốt/Giảm/OFF
+        (tiêu đề kiểu '28 Chốt', '28 Giảm', '28 OFF').
+    1 ngày -> Chốt + Giảm(P) + OFF; nhiều ngày -> chỉ CỘNG DỒN Chốt.
     Trả về số dòng đã nạp, hoặc -1 nếu lỗi đọc."""
     try:
         g = _read_gsheet(url).copy()
@@ -149,47 +146,93 @@ def gsheet_apply(url, date_from, date_to):
         st.sidebar.error(f"Không đọc được Google Sheet: {e}")
         return -1
     g.columns = [str(c).strip() for c in g.columns]
-    colmap = {}
-    for c in g.columns:
-        cl = c.lower()
-        if cl in ('date', 'ngày', 'ngay', 'ngày hoạt động', 'ngay hoat dong'): colmap[c] = 'Date'
-        elif cl in ('sales name', 'name', 'tên', 'ten', 'sales', 'nhân viên', 'nhan vien', 'tên nhân viên'): colmap[c] = 'Sales Name'
-        elif cl in ('chốt', 'chot', 'chốt $', 'chot $', 'premium', 'doanh số', 'doanh so'): colmap[c] = 'Chốt'
-        elif cl == 'off' or 'xin off' in cl or cl in ('nghỉ', 'nghi', 'off hôm nay?', 'off hom nay?'): colmap[c] = 'OFF'
-        elif cl in ('số p', 'so p', 'giảm số p', 'giam so p', 'p', 'giảm p', 'giam p'): colmap[c] = 'Số P'
-    g = g.rename(columns=colmap)
-    if 'Date' not in g.columns or 'Sales Name' not in g.columns:
-        st.sidebar.warning("Google Sheet cần tối thiểu 2 cột: Date và Sales Name.")
-        return 0
-    g['_d'] = pd.to_datetime(g['Date'].astype(str).str.strip(), errors='coerce')
+    idf = st.session_state.input_df
     d0 = pd.to_datetime(date_from, errors='coerce'); d1 = pd.to_datetime(date_to, errors='coerce')
-    sel = g[(g['_d'] >= d0) & (g['_d'] <= d1)].copy()
-    sel['_nm'] = sel['Sales Name'].astype(str).str.strip()
-    n = 0
-    if date_from == date_to:
-        # --- 1 NGÀY: Chốt + OFF + Số P (nếu trùng, lấy dòng cuối) ---
-        for nm in sel['_nm'].unique():
-            if nm not in st.session_state.input_df.index:
-                continue
-            r = sel[sel['_nm'] == nm].iloc[-1]
-            if 'Chốt' in sel.columns and pd.notna(r.get('Chốt')) and str(r.get('Chốt')).strip() != '':
-                try: st.session_state.input_df.loc[nm, 'Chốt $'] = float(r['Chốt'])
-                except Exception: pass
-            if 'OFF' in sel.columns:
-                v = str(r.get('OFF', '')).strip().lower()
-                st.session_state.input_df.loc[nm, 'Xin OFF'] = v in ('true', '1', 'x', 'off', 'yes', 'có', 'co')
-            if 'Số P' in sel.columns and pd.notna(r.get('Số P')) and str(r.get('Số P')).strip() != '':
-                try: st.session_state.input_df.loc[nm, 'Giảm số P'] = float(r['Số P'])
-                except Exception: pass
-            n += 1
+    single = (date_from == date_to)
+    has_date = any(c.lower() in ('date', 'ngày', 'ngay') for c in g.columns)
+
+    if has_date:
+        # ---------- FORMAT DỌC (cũ) ----------
+        colmap = {}
+        for c in g.columns:
+            cl = c.lower()
+            if cl in ('date', 'ngày', 'ngay'): colmap[c] = 'Date'
+            elif cl in ('sales name', 'name', 'tên', 'ten', 'sales', 'nhân viên', 'nhan vien'): colmap[c] = 'Sales Name'
+            elif cl in ('chốt', 'chot', 'chốt $', 'premium'): colmap[c] = 'Chốt'
+            elif cl == 'off' or 'xin off' in cl or cl in ('nghỉ', 'nghi'): colmap[c] = 'OFF'
+            elif cl in ('số p', 'so p', 'giảm số p', 'giam so p', 'p', 'giảm talktime'): colmap[c] = 'Số P'
+        g = g.rename(columns=colmap)
+        if 'Sales Name' not in g.columns:
+            return 0
+        g['_d'] = pd.to_datetime(g['Date'].astype(str).str.strip(), errors='coerce')
+        sel = g[(g['_d'] >= d0) & (g['_d'] <= d1)].copy()
+        sel['_nm'] = sel['Sales Name'].astype(str).str.strip()
+        n = 0
+        if single:
+            for nm in sel['_nm'].unique():
+                if nm not in idf.index: continue
+                r = sel[sel['_nm'] == nm].iloc[-1]
+                if 'Chốt' in sel.columns and str(r.get('Chốt', '')).strip() not in ('', 'nan'):
+                    try: idf.loc[nm, 'Chốt $'] = float(r['Chốt'])
+                    except Exception: pass
+                if 'OFF' in sel.columns: idf.loc[nm, 'Xin OFF'] = _to_off(r.get('OFF', ''))
+                if 'Số P' in sel.columns and str(r.get('Số P', '')).strip() not in ('', 'nan'):
+                    try: idf.loc[nm, 'Giảm số P'] = float(r['Số P'])
+                    except Exception: pass
+                n += 1
+        else:
+            if 'Chốt' in sel.columns:
+                sel['_c'] = pd.to_numeric(sel['Chốt'], errors='coerce').fillna(0)
+                for nm, val in sel.groupby('_nm')['_c'].sum().items():
+                    if nm in idf.index: idf.loc[nm, 'Chốt $'] = float(val); n += 1
+        return n
+
+    # ---------- FORMAT NGANG (mới, theo tháng) ----------
+    name_col = g.columns[0]
+    for c in g.columns:
+        if c.lower() in ('sales name', 'name', 'tên', 'ten', 'sales', 'nhân viên', 'nhan vien'):
+            name_col = c; break
+    # gom cột theo NGÀY: tiêu đề bắt đầu bằng số ngày + nhãn Chốt/Giảm/OFF
+    daymap = {}
+    for c in g.columns:
+        if c == name_col: continue
+        m = re.match(r'\s*(\d{1,2})', c)
+        if not m: continue
+        day = int(m.group(1)); cl = c.lower()
+        if 'chốt' in cl or 'chot' in cl or 'premium' in cl: fld = 'Chốt'
+        elif 'off' in cl or 'nghỉ' in cl or 'nghi' in cl: fld = 'OFF'
+        elif 'giảm' in cl or 'giam' in cl or 'talktime' in cl or cl.strip().endswith(' p') or 'số p' in cl: fld = 'Giảm'
+        else: continue
+        daymap.setdefault(day, {})[fld] = c
+    if not daymap:
+        st.sidebar.warning("Google Sheet chưa đúng format (cần cột kiểu '28 Chốt', '28 OFF'…).")
+        return 0
+    if single:
+        days = [d0.day]
+    elif d0.month == d1.month:
+        days = list(range(d0.day, d1.day + 1))
     else:
-        # --- THEO THÁNG: chỉ CỘNG DỒN Chốt cả khoảng ---
-        if 'Chốt' in sel.columns:
-            sel['_chot'] = pd.to_numeric(sel['Chốt'], errors='coerce').fillna(0)
-            for nm, val in sel.groupby('_nm')['_chot'].sum().items():
-                if nm in st.session_state.input_df.index:
-                    st.session_state.input_df.loc[nm, 'Chốt $'] = float(val)
-                    n += 1
+        days = sorted(daymap.keys())
+    n = 0
+    for _, row in g.iterrows():
+        nm = str(row[name_col]).strip()
+        if nm not in idf.index: continue
+        if single:
+            f = daymap.get(days[0], {})
+            if 'Chốt' in f and str(row.get(f['Chốt'], '')).strip() not in ('', 'nan'):
+                try: idf.loc[nm, 'Chốt $'] = float(row[f['Chốt']])
+                except Exception: pass
+            if 'OFF' in f: idf.loc[nm, 'Xin OFF'] = _to_off(row.get(f['OFF'], ''))
+            if 'Giảm' in f and str(row.get(f['Giảm'], '')).strip() not in ('', 'nan'):
+                try: idf.loc[nm, 'Giảm số P'] = float(row[f['Giảm']])
+                except Exception: pass
+        else:
+            tot = 0.0
+            for d in days:
+                col = daymap.get(d, {}).get('Chốt')
+                if col: tot += pd.to_numeric(row.get(col), errors='coerce') or 0
+            idf.loc[nm, 'Chốt $'] = float(tot)
+        n += 1
     return n
 
 # --- 3. SESSION STATE ---
@@ -325,9 +368,10 @@ if uploaded_file:
         return pd.Series({
             'Actual_Sec': float(ss.sum()),
             'Tong_Cuoc_Goi': int(len(ss)),
-            'Int_5p':  int((ss >= 300).sum()),
-            'Int_10p': int((ss >= 600).sum()),
-            'Int_30p': int((ss >= 1800).sum()),
+            # Mốc RIÊNG BIỆT (không cộng dồn): 1 cuộc chỉ rơi vào ĐÚNG 1 mốc
+            'Int_5p':  int(((ss >= 300) & (ss < 600)).sum()),    # 5–<10 phút
+            'Int_10p': int(((ss >= 600) & (ss < 1800)).sum()),   # 10–<30 phút
+            'Int_30p': int((ss >= 1800).sum()),                  # ≥30 phút
         })
 
     df_active = df_raw[df_raw['Ext_Name'].isin(active_staff)]
@@ -482,7 +526,11 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
             continue
         lvl_bg = LEVEL_COLORS.get(lvl, "#FFFFFF"); lvl_tx = LEVEL_TEXT.get(lvl, "#12326B")
         chot = f"${int(r['Chốt $']):,}" if r['Chốt $'] > 0 else "$0"
-        chot_style = 'style="background:#FEF3C7;color:#92400E;"' if r['Chốt $'] > 0 else ''
+        _c = r['Chốt $']
+        if _c >= 300:   chot_style = 'style="background:#F87171;color:#7F1D1D;"'   # ĐỎ (≥$300)
+        elif _c >= 100: chot_style = 'style="background:#FDBA74;color:#7C2D12;"'   # CAM ($100–300)
+        elif _c >= 1:   chot_style = 'style="background:#FDE68A;color:#854D0E;"'   # VÀNG ($1–100)
+        else:           chot_style = ''
         total_bar = _bar_green(r['total_val'] / r['goal_val'] * 100 if r['goal_val'] > 0 else 100,
                                format_time(r['total_val']))
         pct_bar = _bar_pct(r['pct_val'] / max_pct * 100, r['pct_val'], f"{r['pct_val']:.0f}%")
@@ -624,12 +672,13 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
         st.plotly_chart(fig, use_container_width=True)
 
-    # --- 9b. BIỂU ĐỒ ĐƯỜNG: CUỘC GỌI CHẤT LƯỢNG (≥5 PHÚT) ---
+    # --- 9b. BIỂU ĐỒ ĐƯỜNG: CUỘC GỌI CHẤT LƯỢNG (≥5 PHÚT = 5p + 10p + 30p) ---
     line_df = final_df[~final_df['📊 RESULT'].isin(["OFF", "NO DATA"])].copy()
     if len(line_df):
-        tot_5p = int(final_df['Int_5p'].sum())
+        line_df['Interest'] = line_df['Int_5p'] + line_df['Int_10p'] + line_df['Int_30p']
+        tot_5p = int((final_df['Int_5p'] + final_df['Int_10p'] + final_df['Int_30p']).sum())
         st.markdown(f'<div class="main-header">📈 CUỘC GỌI CHẤT LƯỢNG ≥5 PHÚT | TỔNG: {tot_5p} CUỘC</div>', unsafe_allow_html=True)
-        figl = px.line(line_df, x='Sales Name', y='Int_5p', markers=True, text='Int_5p', height=340)
+        figl = px.line(line_df, x='Sales Name', y='Interest', markers=True, text='Interest', height=340)
         figl.update_traces(line=dict(color='#050E3C', width=3),
                            marker=dict(size=10, color='#1e3a8a', line=dict(color='white', width=1.5)),
                            textposition='top center', textfont=dict(size=14, color='#050E3C', family='Arial Black'))
