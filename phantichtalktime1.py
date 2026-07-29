@@ -19,18 +19,19 @@ file_date = now.strftime("%m-%d-%Y")
 
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
     html, body, .stApp, [data-testid="stAppViewContainer"], [class*="css"] {
         font-family: 'Inter','Segoe UI',Roboto,Arial,sans-serif !important;
+        font-weight: 600 !important;
     }
     .stApp { background-color: #f8fafc; }
     .main-header {
         background: linear-gradient(135deg, #050E3C 0%, #1e3a8a 100%);
         color: white; padding: 16px; border-radius: 12px;
-        text-align: center; font-weight: 700; font-size: 25px; margin-bottom: 15px;
+        text-align: center; font-weight: 800; font-size: 25px; margin-bottom: 15px;
         letter-spacing: 0.3px;
     }
-    /* ===== KPI CARDS (tông NHẠT, căn giữa, chữ to) ===== */
+    /* ===== KPI CARDS ===== */
     .kpi-row { display: flex; gap: 14px; margin: 4px 0 18px 0; flex-wrap: wrap; }
     .kpi-card {
         flex: 1; min-width: 168px; text-align: center;
@@ -45,7 +46,7 @@ st.markdown("""
     }
     .kpi-label { font-size:14px; font-weight:800; letter-spacing:.5px; text-transform:uppercase; color:#64748B; }
     .kpi-value { font-size:36px; font-weight:900; line-height:1.15; margin-top:4px; color:#12326B; }
-    .kpi-sub   { font-size:14px; font-weight:700; color:#3B82F6; margin-top:2px; }
+    .kpi-sub   { font-size:14px; font-weight:800; color:#3B82F6; margin-top:2px; }
     [data-testid="stDataFrame"] td, [data-testid="stDataFrame"] th {
         border: none !important; color: #0f172a !important;
         font-weight: 900 !important; font-size: 16px !important; padding: 11px !important;
@@ -69,7 +70,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. DATABASE (ĐÃ CẬP NHẬT THEO YÊU CẦU CỦA HENRY) ---
+# --- 2. DATABASE ---
 STAFF_CONFIG = {
    "Andres Nguyen": "GOLD", 
     "Charlie Nguyen": "GOLD", 
@@ -96,7 +97,7 @@ STAFF_CONFIG = {
     "Marky Huynh": "Probation"
 }
 STAFF_LIST = list(STAFF_CONFIG.keys())
-LEVEL_TARGETS = {"GOLD": 9000, "SILVER": 9000, "BRONZE": 9000, "Associated": 9000, "Probation": 9000}  # 9000s = 2h30 cho tất cả
+LEVEL_TARGETS = {"GOLD": 9000, "SILVER": 9000, "BRONZE": 9000, "Associated": 9000, "Probation": 9000}
 LEVEL_COLORS = {"GOLD": "#FDE9B8", "SILVER": "#E4EAF1", "BRONZE": "#F1DAC4", "Associated": "#DAE6FB", "Probation": "#D2F0E1"}
 LEVEL_TEXT   = {"GOLD": "#8A6D0B", "SILVER": "#475569", "BRONZE": "#9A5A24", "Associated": "#1E40AF", "Probation": "#0F766E"}
 
@@ -116,7 +117,6 @@ def format_time(seconds):
     return f"{h:02d}:{m:02d}:{s:02d}"
 
 def extract_report_range(df):
-    """Trả về (date_from, date_to, n_days) dạng MM/DD/YYYY từ cột Date của file RingCentral."""
     if 'Date' not in df.columns:
         return (None, None, 0)
     s = pd.to_datetime(df['Date'].astype(str).str.strip(), format='%a %m/%d/%Y', errors='coerce').dropna()
@@ -137,7 +137,6 @@ def _to_off(v):
     return str(v).strip().lower() in ('true', '1', 'x', 'off', 'yes', 'có', 'co')
 
 def _safe_num(v):
-    """Chuyển ô Sheet sang số; rỗng/NaN -> 0 (tránh bug `NaN or 0` = NaN)."""
     n = pd.to_numeric(v, errors='coerce')
     return 0.0 if pd.isna(n) else float(n)
 
@@ -153,12 +152,6 @@ def _parse_ext_name(ext):
     return b
 
 def gsheet_apply(url, date_from, date_to):
-    """Nạp dữ liệu từ Google Sheet (published CSV). Tự nhận 2 format:
-      • DỌC (cũ): cột Date, Sales Name, Chốt, OFF, Số P — mỗi dòng 1 người/ngày.
-      • NGANG (mới, theo tháng): hàng = tên Sales; cột = ngày, mỗi ngày có Chốt/Giảm/OFF
-        (tiêu đề kiểu '28 Chốt', '28 Giảm', '28 OFF').
-    1 ngày -> Chốt + Giảm(P) + OFF; nhiều ngày -> chỉ CỘNG DỒN Chốt.
-    Trả về số dòng đã nạp, hoặc -1 nếu lỗi đọc."""
     try:
         g = _read_gsheet(url).copy()
     except Exception as e:
@@ -171,7 +164,6 @@ def gsheet_apply(url, date_from, date_to):
     has_date = any(c.lower() in ('date', 'ngày', 'ngay') for c in g.columns)
 
     if has_date:
-        # ---------- FORMAT DỌC (cũ) ----------
         colmap = {}
         for c in g.columns:
             cl = c.lower()
@@ -205,12 +197,10 @@ def gsheet_apply(url, date_from, date_to):
                     if nm in idf.index: idf.loc[nm, 'Chốt $'] = float(val); n += 1
         return n
 
-    # ---------- FORMAT NGANG (mới, theo tháng) ----------
     name_col = g.columns[0]
     for c in g.columns:
         if c.lower() in ('sales name', 'name', 'tên', 'ten', 'sales', 'nhân viên', 'nhan vien'):
             name_col = c; break
-    # gom cột theo NGÀY: tiêu đề bắt đầu bằng số ngày + nhãn Chốt/Giảm/OFF
     daymap = {}
     for c in g.columns:
         if c == name_col: continue
@@ -228,7 +218,6 @@ def gsheet_apply(url, date_from, date_to):
     if single:
         days = [d0.day]
     else:
-        # Duyệt từng ngày thực trong CSV (tránh cộng nhầm cả tháng khi range nhiều ngày)
         days = []
         cur = d0.normalize()
         while cur <= d1.normalize():
@@ -261,9 +250,6 @@ if 'input_df' not in st.session_state:
     }).set_index("Sales Name")
 
 def update_input():
-    # Ghi theo TÊN (không theo vị trí) để tránh lệch dòng khi file RingCentral
-    # không đủ 24 người. row_idx là vị trí trong bảng đang hiển thị (active_staff),
-    # nên phải map ngược ra tên trước khi ghi.
     if "editor_v82" in st.session_state:
         active = st.session_state.get('active_staff', [])
         for row_idx, changes in st.session_state["editor_v82"]["edited_rows"].items():
@@ -278,8 +264,6 @@ st.sidebar.markdown("# 💎 Master Dashboard")
 st.sidebar.caption(f"🛠️ Code version: **{APP_VERSION}**")
 uploaded_file = st.sidebar.file_uploader("📂 Tải file RingCentral", type=["csv"])
 
-# --- LIÊN KẾT GOOGLE SHEET NHẬP LIỆU (Chốt / OFF / Số P theo ngày) ---
-# Link CSV published mặc định (gắn cứng) — dữ liệu tự cập nhật gần realtime.
 DEFAULT_GSHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTv1WZPG26RYVV4p1e3CuTW59OcLH18udmg0FvE_IaNZn8B0S7Ki0TzD5ENxDbWolGL7y42kn7PsHcA/pub?output=csv"
 _default_gs = DEFAULT_GSHEET_URL
 try:
@@ -297,11 +281,9 @@ with st.sidebar.expander("🔗 Google Sheet nhập liệu", expanded=False):
         st.rerun()
     st.caption("Nhập Chốt/OFF/Số P theo NGÀY trên Google Sheet — web tự lấy đúng range ngày trong file CSV. Tự cập nhật ~10 giây/lần.")
 
-# Thư mục lưu dữ liệu Final theo ngày (nằm cạnh file .py)
 HISTORY_DIR = "history"
 os.makedirs(HISTORY_DIR, exist_ok=True)
 
-# --- ĐIỀU HƯỚNG TRANG (luôn hiện, nút to dễ bấm) ---
 if 'page' not in st.session_state:
     st.session_state.page = "📊 Báo cáo & Biểu đồ"
 st.sidebar.markdown("---")
@@ -319,10 +301,9 @@ if uploaded_file:
     df_raw = pd.read_csv(uploaded_file)
     df_raw.columns = df_raw.columns.str.strip()
 
-    # KHOẢNG NGÀY của báo cáo (để link Google Sheet + hiển thị range nếu chạy theo tháng)
     date_from, date_to, n_days = extract_report_range(df_raw)
     is_range = bool(date_from and date_to and date_from != date_to)
-    report_date = date_from                                   # dùng cho khớp 1 ngày
+    report_date = date_from
     if date_from:
         if is_range:
             file_date = f"{date_from.replace('/','-')}_den_{date_to.replace('/','-')}"
@@ -331,26 +312,23 @@ if uploaded_file:
             file_date = date_from.replace('/', '-')
             static_time = f"{date_from} | {now.strftime('%H:%M')}"
 
-    # --- BƯỚC LỌC 1: CHỈ GIỮ OUTGOING — XÓA THẲNG MỌI DÒNG INCOMING ---
     n_incoming = 0
     if 'Direction' in df_raw.columns:
         _dir = df_raw['Direction'].astype(str).str.strip().str.lower()
         n_incoming = int((_dir == 'incoming').sum())
-        df_raw = df_raw[_dir == 'outgoing']          # bỏ Incoming + mọi dòng không phải Outgoing
+        df_raw = df_raw[_dir == 'outgoing']
         if n_incoming:
             st.sidebar.caption(f"🚫 Đã loại {n_incoming} dòng Incoming khỏi talktime.")
     else:
         st.warning("⚠️ Không tìm thấy cột 'Direction'. Vui lòng kiểm tra lại định dạng file.")
 
-    # --- ĐÁNH DẤU DÒNG TRANSFER (KHÔNG bỏ) — dùng làm tín hiệu nhận diện chuỗi transfer ---
     if 'Action' in df_raw.columns:
         df_raw['is_tr'] = df_raw['Action'].astype(str).str.strip().str.lower() == 'transfer'
-    elif 'Type' in df_raw.columns:   # dự phòng: Type trống ~ Transfer
+    elif 'Type' in df_raw.columns:
         df_raw['is_tr'] = df_raw['Type'].astype(str).str.strip().str.lower() != 'voice'
     else:
         df_raw['is_tr'] = False
 
-    # RingCentral: thường là "Ext - Tên" hoặc đôi khi "Tên - Ext"
     df_raw['Ext_Name'] = df_raw['Extension'].apply(_parse_ext_name)
     df_raw['Sec'] = df_raw['Duration'].apply(to_seconds)
     df_raw['Start'] = pd.to_datetime(
@@ -359,21 +337,12 @@ if uploaded_file:
     df_raw = df_raw.dropna(subset=['Start'])
     df_raw['End'] = df_raw['Start'] + pd.to_timedelta(df_raw['Sec'], unit='s')
 
-    # BÁO CÁO TẤT CẢ nhân viên theo đúng thứ tự STAFF_LIST (không lọc bỏ ai).
     active_in_file = df_raw['Ext_Name'].unique()
     active_staff = list(STAFF_LIST)
     no_data_staff = [n for n in active_staff if n not in active_in_file]
     NO_DATA_SET = set(no_data_staff)
 
-    # TÍNH TALKTIME theo TÍN HIỆU TRANSFER:
-    # - Gom các dòng chồng thời gian thành 1 cụm.
-    # - Cụm CÓ dòng Transfer  = chuỗi transfer (cùng 1 cuộc bị chuyển máy) -> tính 1 cuộc = leg DÀI NHẤT.
-    # - Cụm KHÔNG Transfer     = các cuộc gọi RIÊNG BIỆT (khác khách) -> CỘNG ĐỦ từng cuộc.
-    # Dòng Transfer chỉ dùng để nhận diện, KHÔNG cộng duration.
     def _agg_calls(g):
-        """Tính talktime: Transfer = tín hiệu nối chuỗi (không cộng duration).
-        Cuộc chồng thời gian trong chuỗi transfer -> 1 cuộc (leg dài nhất).
-        Cuộc riêng (không transfer) -> cộng đủ từng cuộc."""
         g = g.sort_values('Start')
         contribs, session = [], None
 
@@ -426,11 +395,8 @@ if uploaded_file:
 
     st.session_state['active_staff'] = active_staff
 
-    # --- LIÊN KẾT GOOGLE SHEET (REALTIME): mỗi lần chạy tự lấy đúng range ngày ---
-    # 1 ngày -> Chốt/OFF/Số P; nhiều ngày -> cộng dồn Chốt. Đọc qua cache 10s.
     _gs = st.session_state.get("gsheet_url", "").strip()
     if _gs and date_from:
-        # reset về mặc định trước khi nạp -> phản ánh đúng cả khi Sheet bị xoá dòng
         st.session_state.input_df.loc[active_staff, ['Chốt $', 'Xin OFF', 'Giảm số P']] = [0.0, False, 0.0]
         _n = gsheet_apply(_gs, date_from, date_to)
         if _n >= 0:
@@ -439,14 +405,13 @@ if uploaded_file:
 
     current_input_display = st.session_state.input_df.loc[active_staff]
 
-    # --- TÍNH TOÁN (chạy chung cho cả 2 trang) ---
     final_df = pd.concat([current_input_display, stats], axis=1).fillna(0).reset_index()
     final_df.rename(columns={'index': 'Sales Name'}, inplace=True)
 
     _days_mult = n_days if (is_range and n_days > 0) else 1
     def calculate_metrics(row):
         name = row['Sales Name']; lvl = STAFF_CONFIG.get(name, "Probation")
-        target_orig = LEVEL_TARGETS.get(lvl, 9000) * _days_mult   # theo THÁNG: mục tiêu × số ngày
+        target_orig = LEVEL_TARGETS.get(lvl, 9000) * _days_mult
         actual = row['Actual_Sec']
         giam_p = float(row['Giảm số P'])
         if row['Xin OFF']:
@@ -455,13 +420,11 @@ if uploaded_file:
         if name in NO_DATA_SET and sales == 0:
             return pd.Series([lvl, target_orig, giam_p, 0, 0, 0.0, "NO DATA"])
         if is_range:
-            # THEO THÁNG: goal = 2h30 × số ngày; Chốt chỉ hiển thị (không trừ bonus, không Giảm P)
             goal = target_orig
             total = actual
             pct = 100.0 if goal <= 0 else total / goal * 100
             return pd.Series([lvl, goal, 0.0, actual, total, round(float(pct), 1),
                               "GOOD JOB" if pct >= 100 else "COME ON!"])
-        # --- 1 NGÀY: rule cũ (bonus theo Chốt, +Giảm P vào Total) ---
         is_done = sales >= 2000
         bonus = 1800 if 300 <= sales < 500 else (2700 if 500 <= sales < 1000 else (5400 if 1000 <= sales < 2000 else 0))
         goal = 0 if is_done else max(0, target_orig - bonus)
@@ -471,10 +434,8 @@ if uploaded_file:
                           "GOOD JOB" if (pct >= 100 or is_done) else "COME ON!"])
 
     final_df[['🏅 LVL', 'goal_val', 'giam_p', 'actual_val', 'total_val', 'pct_val', '📊 RESULT']] = final_df.apply(calculate_metrics, axis=1)
-    # % lấy CỘT CAO NHẤT làm tham chiếu (để so sánh tương đối giữa các bạn)
     _vv = final_df[~final_df['📊 RESULT'].isin(["OFF", "NO DATA"])]
     max_pct = float(_vv['pct_val'].max()) if len(_vv) and _vv['pct_val'].max() > 0 else 100.0
-    # GIỮ THỨ TỰ CỐ ĐỊNH theo STAFF_LIST (không sort theo hiệu suất)
     final_df = final_df.reset_index(drop=True)
 
 # ==================== TRANG 1: NHẬP LIỆU ====================
@@ -488,7 +449,6 @@ if uploaded_file and page == "📝 Nhập doanh số & Điều chỉnh":
 
 # ==================== TRANG 2: BÁO CÁO ====================
 if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
-    # (Tiêu đề + KPI được hiển thị trong khối bảng HTML bên dưới — không lặp lại ở đây)
     t_p = int(final_df['Chốt $'].sum())
     t_t = format_time(final_df['Actual_Sec'].sum())
     t_c = int(final_df['Tong_Cuoc_Goi'].sum())
@@ -497,13 +457,12 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
     n_done = int((final_df['📊 RESULT'] == "GOOD JOB").sum())
     n_active = int(len(_valid))
 
-    # --- 8. BẢNG (dữ liệu để export CSV; bảng hiển thị là HTML bên dưới) ---
     valid = final_df[~final_df['📊 RESULT'].isin(["OFF", "NO DATA"])]
     tot_goal = valid['goal_val'].sum()
     tot_total = valid['total_val'].sum()
     tot_pct = round(tot_total / tot_goal * 100, 1) if tot_goal > 0 else 0.0
 
-    def _nd(r, v):  # "—" nếu NO DATA
+    def _nd(r, v):
         return "—" if r['📊 RESULT'] == "NO DATA" else v
     disp_df = pd.DataFrame()
     disp_df['👤 SALES'] = final_df['Sales Name']
@@ -538,17 +497,15 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
     }
     disp_df = pd.concat([disp_df, pd.DataFrame([total_row])], ignore_index=True)
 
-    # --- GHI CHÚ: nhân viên không có dữ liệu talktime ---
     if no_data_staff:
         st.warning(f"📝 **Không có dữ liệu talktime ({len(no_data_staff)}):** " + " • ".join(no_data_staff))
 
-    # ================= CHẾ ĐỘ TOÀN MÀN HÌNH (tiêu đề + KPI + bảng cùng lúc) =================
-    def _bar_green(pct, label):   # Total so với GOAL — xanh nhạt
+    def _bar_green(pct, label):
         p = max(0, min(pct, 100))
         return (f'<div class="pbar"><div class="pfill" style="width:{p:.0f}%;background:#A7D8B0;"></div>'
                 f'<span style="color:#1E5631;">{label}</span></div>')
 
-    def _bar_pct(rel_w, real_pct, label):   # % — dài so với cột cao nhất; màu theo ngưỡng
+    def _bar_pct(rel_w, real_pct, label):
         p = max(0, min(rel_w, 100))
         if real_pct >= 100: fill, txt = "#EF4444", "#ffffff"
         else:               fill, txt = "#FDE68A", "#7A5B00"
@@ -560,7 +517,7 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
         res = r['📊 RESULT']; lvl = r['🏅 LVL']
         s5, s10, s30 = int(r["Int_5p"]), int(r["Int_10p"]), int(r["Int_30p"])
         if res == "NO DATA":
-            rows_html += (f'<tr class="nod"><td>{r["Sales Name"]}</td><td>{lvl}</td>'
+            rows_html += (f'<tr class="nod"><td style="font-weight:900;">{r["Sales Name"]}</td><td>{lvl}</td>'
                           f'<td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td>'
                           f'<td>0</td><td>{s5}</td><td>{s10}</td><td>{s30}</td><td>{s5+s10+s30}</td>'
                           f'<td class="badge nodb">NO DATA</td></tr>')
@@ -568,9 +525,9 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
         lvl_bg = LEVEL_COLORS.get(lvl, "#FFFFFF"); lvl_tx = LEVEL_TEXT.get(lvl, "#12326B")
         chot = f"${int(r['Chốt $']):,}" if r['Chốt $'] > 0 else "$0"
         _c = r['Chốt $']
-        if _c >= 300:   chot_style = 'style="background:#F87171;color:#7F1D1D;"'   # ĐỎ (≥$300)
-        elif _c >= 100: chot_style = 'style="background:#FDBA74;color:#7C2D12;"'   # CAM ($100–300)
-        elif _c >= 1:   chot_style = 'style="background:#FDE68A;color:#854D0E;"'   # VÀNG ($1–100)
+        if _c >= 300:   chot_style = 'style="background:#F87171;color:#7F1D1D;font-weight:900;"'
+        elif _c >= 100: chot_style = 'style="background:#FDBA74;color:#7C2D12;font-weight:900;"'
+        elif _c >= 1:   chot_style = 'style="background:#FDE68A;color:#854D0E;font-weight:900;"'
         else:           chot_style = ''
         total_bar = _bar_green(r['total_val'] / r['goal_val'] * 100 if r['goal_val'] > 0 else 100,
                                format_time(r['total_val']))
@@ -578,18 +535,18 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
         if res == "GOOD JOB": badge = '<td class="badge okb">GOOD JOB</td>'
         elif res == "OFF":    badge = '<td class="badge offb">OFF</td>'
         else:                 badge = '<td class="badge cmb">COME ON!</td>'
-        rows_html += (f'<tr><td>{r["Sales Name"]}</td>'
-                      f'<td style="background:{lvl_bg};color:{lvl_tx};">{lvl}</td>'
+        rows_html += (f'<tr><td style="font-weight:900;">{r["Sales Name"]}</td>'
+                      f'<td style="background:{lvl_bg};color:{lvl_tx};font-weight:900;">{lvl}</td>'
                       f'<td {chot_style}>{chot}</td>'
                       f'<td>{format_time(r["goal_val"])}</td>'
                       f'<td>{int(r["giam_p"])}p</td>'
                       f'<td>{format_time(r["actual_val"])}</td>'
                       f'<td>{total_bar}</td><td>{pct_bar}</td>'
                       f'<td>{int(r["Tong_Cuoc_Goi"])}</td>'
-                      f'<td>{s5}</td><td>{s10}</td><td>{s30}</td><td><b>{s5+s10+s30}</b></td>'
+                      f'<td>{s5}</td><td>{s10}</td><td>{s30}</td><td><b style="font-weight:900;">{s5+s10+s30}</b></td>'
                       f'{badge}</tr>')
     T5, T10, T30 = int(final_df["Int_5p"].sum()), int(final_df["Int_10p"].sum()), int(final_df["Int_30p"].sum())
-    rows_html += (f'<tr class="tot"><td>TOTAL</td><td></td>'
+    rows_html += (f'<tr class="tot"><td style="font-weight:900;">TOTAL</td><td></td>'
                   f'<td>${int(final_df["Chốt $"].sum()):,}</td>'
                   f'<td>{format_time(tot_goal)}</td>'
                   f'<td>{int(valid["giam_p"].sum())}p</td>'
@@ -625,40 +582,40 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
       </table>
     </div>
     <style>
-      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-      * {{ box-sizing:border-box; font-family:'Inter','Segoe UI',Roboto,Arial,sans-serif; }}
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+      * {{ box-sizing:border-box; font-family:'Inter','Segoe UI',Roboto,Arial,sans-serif; font-weight:700; }}
       body {{ margin:0; }}
       .wrap {{ padding:16px; background:#F6F9FF; position:relative; }}
       #reportBox:fullscreen {{ overflow:auto; }}
       .fsbtn {{ position:absolute; right:18px; top:18px; z-index:9; background:#fff; color:#33507A;
-                border:1px solid #CBD8EC; border-radius:10px; padding:9px 15px; font-weight:600;
+                border:1px solid #CBD8EC; border-radius:10px; padding:9px 15px; font-weight:800;
                 font-size:14px; cursor:pointer; box-shadow:0 2px 6px rgba(30,58,138,.12); }}
       .fsbtn:hover {{ background:#EEF4FF; }}
       .title {{ background:linear-gradient(135deg,#0F2A5B,#1E40AF); color:#fff; text-align:center;
-                font-weight:700; font-size:26px; padding:18px; border-radius:14px; letter-spacing:.3px; }}
+                font-weight:900; font-size:26px; padding:18px; border-radius:14px; letter-spacing:.3px; }}
       .kpis {{ display:flex; gap:14px; margin:16px 0; flex-wrap:wrap; }}
       .kpi {{ flex:1; min-width:168px; text-align:center; background:#fff; border:1px solid #E6ECF5;
               border-radius:16px; padding:16px; box-shadow:0 6px 16px rgba(30,58,138,.07); }}
       .kpi .ic {{ width:48px;height:48px;border-radius:14px;margin:0 auto 8px;display:flex;
                   align-items:center;justify-content:center;font-size:23px; }}
-      .kpi .lb {{ font-size:14px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#7A8AA0; }}
-      .kpi .vl {{ font-size:35px;font-weight:800;color:#1B3B72; }}
+      .kpi .lb {{ font-size:14px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:#7A8AA0; }}
+      .kpi .vl {{ font-size:35px;font-weight:900;color:#1B3B72; }}
       table {{ width:100%; border-collapse:separate; border-spacing:0 6px; }}
-      th {{ font-size:16.5px; font-weight:900; color:#5A6B85; text-align:center; padding:7px 5px;
+      th {{ font-size:16.5px; font-weight:900; color:#334155; text-align:center; padding:7px 5px;
             text-transform:uppercase; letter-spacing:.2px; }}
-      td {{ font-size:16.5px; font-weight:900; text-align:center; padding:9px 5px; background:#fff; color:#1A2337; }}
+      td {{ font-size:16.5px; font-weight:800; text-align:center; padding:9px 5px; background:#fff; color:#0f172a; }}
       tr td:first-child {{ border-radius:12px 0 0 12px; }}
       tr td:last-child  {{ border-radius:0 12px 12px 0; }}
-      tr.nod td {{ background:#F3F6FB; color:#AEB8C6; font-weight:800; }}
-      tr.tot td {{ background:#33507A; color:#fff; font-weight:800; font-size:17.5px; }}
+      tr.nod td {{ background:#F3F6FB; color:#94A3B8; font-weight:800; }}
+      tr.tot td {{ background:#1E3A8A; color:#fff; font-weight:900; font-size:17.5px; }}
       .pbar {{ position:relative; height:22px; background:#EEF2F8; border-radius:7px; overflow:hidden; }}
       .pfill {{ position:absolute; left:0; top:0; bottom:0; }}
       .pbar span {{ position:relative; z-index:2; line-height:22px; font-weight:900; font-size:14.5px; }}
       .badge {{ border-radius:10px; font-weight:900; }}
       .okb {{ background:#DCFCE7; color:#166534; }}
       .cmb {{ background:#FEE2E2; color:#B91C1C; }}
-      .offb {{ background:#E2E8F0; color:#475569; }}
-      .nodb {{ background:#EEF2F8; color:#94A3B8; }}
+      .offb {{ background:#E2E8F0; color:#334155; }}
+      .nodb {{ background:#EEF2F8; color:#64748B; }}
     </style>
     <script>
       function goFS() {{
@@ -673,7 +630,6 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
     st.markdown("#### 📋 Bảng kết quả")
     components.html(full_html, height=box_h, scrolling=True)
 
-    # --- COPY CỘT % ĐỂ DÁN SANG GOOGLE SHEET ---
     with st.expander("📋 Copy cột '% HOÀN THÀNH' để dán sang Google Sheet"):
         st.caption("Bấm biểu tượng copy ở góc phải ô bên dưới → sang Google Sheet, chọn 1 ô rồi Ctrl+V. "
                    "Các dòng sẽ tự đổ xuống thành 1 cột, đúng thứ tự như bảng (kèm dòng TOTAL cuối).")
@@ -687,7 +643,6 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
             st.markdown("**Số thường** (vd 53, dễ tính toán)")
             st.code(pct_plain, language=None)
 
-    # --- 9. BIỂU ĐỒ (phân nhóm trạng thái + đường mục tiêu 100%) ---
     chart_df = final_df[~final_df['📊 RESULT'].isin(["OFF", "NO DATA"])].copy()
     if len(chart_df):
         def _status(r):
@@ -713,7 +668,6 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
         st.plotly_chart(fig, use_container_width=True)
 
-    # --- 9b. BIỂU ĐỒ ĐƯỜNG: CUỘC GỌI CHẤT LƯỢNG (≥5 PHÚT = 5p + 10p + 30p) ---
     line_df = final_df[~final_df['📊 RESULT'].isin(["OFF", "NO DATA"])].copy()
     if len(line_df):
         line_df['Interest'] = line_df['Int_5p'] + line_df['Int_10p'] + line_df['Int_30p']
@@ -731,17 +685,14 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
         figl.update_yaxes(rangemode='tozero', gridcolor='#e2e8f0')
         st.plotly_chart(figl, use_container_width=True)
 
-    # --- 10. SNAPSHOT (dạng số + có cột Date) ---
     snapshot = final_df[['Sales Name', '🏅 LVL', 'Xin OFF', 'Chốt $',
                          'goal_val', 'giam_p', 'actual_val', 'total_val', 'pct_val',
                          'Tong_Cuoc_Goi', 'Int_5p', 'Int_10p', 'Int_30p', '📊 RESULT']].copy()
     snapshot.insert(0, 'Date', file_date)
 
-    # --- 11. LƯU / EXPORT ---
     st.markdown("---")
     cc1, cc2, cc3 = st.columns([1.4, 1, 1])
     with cc1:
-        # LƯU DỮ LIỆU FINAL CỦA NGÀY -> đọc lại được ở trang Lịch sử
         if st.button(f"💾 Lưu Final ngày {file_date}", use_container_width=True, type="primary"):
             path = os.path.join(HISTORY_DIR, f"Final_{file_date}.csv")
             snapshot.to_csv(path, index=False, encoding='utf-8-sig')
@@ -767,7 +718,6 @@ if page == "📅 Lịch sử":
         sel = st.selectbox("Chọn ngày cần xem lại", dates)
         sdf = pd.read_csv(os.path.join(HISTORY_DIR, f"Final_{sel}.csv"))
 
-        # KPI của ngày đã lưu
         v = sdf[~sdf['📊 RESULT'].isin(["OFF", "NO DATA"])]
         tp = int(sdf['Chốt $'].sum()); tt = format_time(sdf['actual_val'].sum())
         tc = int(sdf['Tong_Cuoc_Goi'].sum())
@@ -788,7 +738,6 @@ if page == "📅 Lịch sử":
                 <div class="kpi-label">Đạt mục tiêu</div><div class="kpi-value">{nd}</div></div>
         </div>""", unsafe_allow_html=True)
 
-        # Bảng ngày đã lưu (định dạng lại thời gian)
         show = pd.DataFrame()
         show['👤 SALES'] = sdf['Sales Name']; show['🏅 LVL'] = sdf['🏅 LVL']
         show['💵 CHỐT $'] = sdf['Chốt $']
