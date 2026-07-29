@@ -6,6 +6,8 @@ from datetime import datetime
 import pytz
 import os, glob
 
+APP_VERSION = "2026.07.28-fix"  # đổi khi deploy — kiểm tra dòng này trên sidebar web
+
 # --- 1. CẤU HÌNH TRANG & UI LUXURY ---
 st.set_page_config(page_title="Dream Talent - Henry Master Hub", layout="wide")
 
@@ -273,6 +275,7 @@ def update_input():
 
 # --- 4. SIDEBAR ---
 st.sidebar.markdown("# 💎 Master Dashboard")
+st.sidebar.caption(f"🛠️ Code version: **{APP_VERSION}**")
 uploaded_file = st.sidebar.file_uploader("📂 Tải file RingCentral", type=["csv"])
 
 # --- LIÊN KẾT GOOGLE SHEET NHẬP LIỆU (Chốt / OFF / Số P theo ngày) ---
