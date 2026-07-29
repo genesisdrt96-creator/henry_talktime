@@ -279,21 +279,16 @@ if uploaded_file:
     else:
         st.warning("⚠️ Không tìm thấy cột 'Direction'. Vui lòng kiểm tra lại định dạng file.")
 
-    # --- BƯỚC LỌC 2: BỎ CALL TRANSFER (lọc theo Action, KHÔNG theo Type) ---
-    # Sửa quan trọng: RingCentral đôi khi ghi cuộc VoIP Call thật nhưng để TRỐNG cột Type.
-    # Nếu lọc 'Type == Voice' sẽ vô tình bỏ mất các cuộc thật này (kể cả cuộc kết nối 5-7 phút).
-    # Chỉ cần loại đúng dòng Transfer (nguồn nhân bản duration) là đủ.
+    # --- ĐÁNH DẤU DÒNG TRANSFER (KHÔNG bỏ) — dùng làm tín hiệu nhận diện chuỗi transfer ---
     if 'Action' in df_raw.columns:
-        df_raw = df_raw[df_raw['Action'].astype(str).str.strip().str.lower() != 'transfer']
-    elif 'Type' in df_raw.columns:   # dự phòng nếu file không có cột Action
-        df_raw = df_raw[df_raw['Type'].astype(str).str.strip().str.lower() == 'voice']
+        df_raw['is_tr'] = df_raw['Action'].astype(str).str.strip().str.lower() == 'transfer'
+    elif 'Type' in df_raw.columns:   # dự phòng: Type trống ~ Transfer
+        df_raw['is_tr'] = df_raw['Type'].astype(str).str.strip().str.lower() != 'voice'
     else:
-        st.warning("⚠️ Không tìm thấy cột 'Action' lẫn 'Type'. Không thể lọc Transfer.")
+        df_raw['is_tr'] = False
 
     df_raw['Ext_Name'] = df_raw['Extension'].str.split(' - ', n=1).str[1].fillna("Unknown")
     df_raw['Sec'] = df_raw['Duration'].apply(to_seconds)
-    # Dựng mốc thời gian để phát hiện các cuộc CHỒNG NHAU (chuỗi transfer / kết nối Agent).
-    # Time chỉ có độ phân giải PHÚT -> đủ để bắt các leg cùng một cuộc.
     df_raw['Start'] = pd.to_datetime(
         df_raw['Date'].astype(str).str.strip() + ' ' + df_raw['Time'].astype(str).str.strip(),
         format='%a %m/%d/%Y %I:%M %p', errors='coerce')
@@ -306,21 +301,27 @@ if uploaded_file:
     no_data_staff = [n for n in active_staff if n not in active_in_file]
     NO_DATA_SET = set(no_data_staff)
 
-    # DEDUP CHỒNG THỜI GIAN: chỉ gom khi 2 cuộc chồng nhau THỰC SỰ > 60 giây
-    # (vượt sai số làm tròn phút của cột Time). Chuỗi transfer chồng nhau nhiều phút -> gom;
-    # các cuộc nối tiếp chỉ "chồng" vài giây do làm tròn -> GIỮ RIÊNG (không mất cuộc thật).
-    OVERLAP_TOL = pd.Timedelta(seconds=60)
-    def _dedup_overlap(g):
+    # TÍNH TALKTIME theo TÍN HIỆU TRANSFER:
+    # - Gom các dòng chồng thời gian thành 1 cụm.
+    # - Cụm CÓ dòng Transfer  = chuỗi transfer (cùng 1 cuộc bị chuyển máy) -> tính 1 cuộc = leg DÀI NHẤT.
+    # - Cụm KHÔNG Transfer     = các cuộc gọi RIÊNG BIỆT (khác khách) -> CỘNG ĐỦ từng cuộc.
+    # Dòng Transfer chỉ dùng để nhận diện, KHÔNG cộng duration.
+    def _agg_calls(g):
         g = g.sort_values('Start')
-        maxes, ce, cur = [], None, 0
-        for s, e, sec in zip(g['Start'], g['End'], g['Sec']):
-            if ce is None or s >= ce - OVERLAP_TOL:   # cụm mới (không chồng, hoặc chồng ≤60s do làm tròn)
-                if ce is not None: maxes.append(cur)
-                ce, cur = e, sec
-            else:                                      # chồng THỰC SỰ >60s -> cùng cuộc, lấy DÀI NHẤT
-                ce = max(ce, e); cur = max(cur, sec)
-        if ce is not None: maxes.append(cur)
-        ss = pd.Series(maxes, dtype=float)
+        contribs, ce, voice, has_tr = [], None, [], False
+        def _flush():
+            if voice:
+                if has_tr: contribs.append(max(voice))   # chuỗi transfer -> 1 cuộc (dài nhất)
+                else: contribs.extend(voice)             # cuộc riêng -> giữ đủ
+        for s, e, sec, istr in zip(g['Start'], g['End'], g['Sec'], g['is_tr']):
+            if ce is None or s > ce:                     # cụm mới
+                _flush(); voice, has_tr, ce = [], False, e
+            else:
+                ce = max(ce, e)
+            if istr: has_tr = True
+            else: voice.append(sec)
+        _flush()
+        ss = pd.Series(contribs, dtype=float)
         return pd.Series({
             'Actual_Sec': float(ss.sum()),
             'Tong_Cuoc_Goi': int(len(ss)),
@@ -331,7 +332,7 @@ if uploaded_file:
 
     df_active = df_raw[df_raw['Ext_Name'].isin(active_staff)]
     if len(df_active):
-        stats = df_active.groupby('Ext_Name').apply(_dedup_overlap).reindex(active_staff).fillna(0)
+        stats = df_active.groupby('Ext_Name').apply(_agg_calls).reindex(active_staff).fillna(0)
     else:
         stats = pd.DataFrame(
             0, index=active_staff,
