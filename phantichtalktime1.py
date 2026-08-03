@@ -26,9 +26,9 @@ st.markdown("""
     }
     .stApp { background-color: #f8fafc; }
     .main-header {
-        background: linear-gradient(135deg, #050E3C 0%, #1e3a8a 100%);
+        background: linear-gradient(135deg, #050E3C 0%, #17297a 100%);
         color: white; padding: 16px; border-radius: 12px;
-        text-align: center; font-weight: 800; font-size: 25px; margin-bottom: 15px;
+        text-align: center; font-weight: 800; font-size: 31px; margin-bottom: 15px;
         letter-spacing: 0.3px;
     }
     /* ===== KPI CARDS ===== */
@@ -42,23 +42,23 @@ st.markdown("""
     }
     .kpi-ico {
         width:48px; height:48px; border-radius:14px; display:flex;
-        align-items:center; justify-content:center; font-size:23px; margin:0 auto 10px auto;
+        align-items:center; justify-content:center; font-size:29px; margin:0 auto 10px auto;
     }
-    .kpi-label { font-size:14px; font-weight:800; letter-spacing:.5px; text-transform:uppercase; color:#64748B; }
-    .kpi-value { font-size:36px; font-weight:900; line-height:1.15; margin-top:4px; color:#12326B; }
-    .kpi-sub   { font-size:14px; font-weight:800; color:#3B82F6; margin-top:2px; }
+    .kpi-label { font-size:18px; font-weight:800; letter-spacing:.5px; text-transform:uppercase; color:#475569; }
+    .kpi-value { font-size:45px; font-weight:900; line-height:1.15; margin-top:4px; color:#0D2350; }
+    .kpi-sub   { font-size:18px; font-weight:800; color:#2563EB; margin-top:2px; }
     [data-testid="stDataFrame"] td, [data-testid="stDataFrame"] th {
         border: none !important; color: #0f172a !important;
-        font-weight: 900 !important; font-size: 16px !important; padding: 11px !important;
+        font-weight: 900 !important; font-size: 20px !important; padding: 11px !important;
     }
     /* Tiêu đề điều hướng trong sidebar */
     .nav-title {
-        color: #050E3C; font-size: 16px; font-weight: 900; text-transform: uppercase;
+        color: #050E3C; font-size: 20px; font-weight: 900; text-transform: uppercase;
         letter-spacing: 0.5px; margin: 4px 0 8px 0; text-align: center;
     }
     /* Nút điều hướng trang: to, bo góc, dễ bấm */
     section[data-testid="stSidebar"] .stButton > button {
-        font-size: 17px !important; font-weight: 900 !important;
+        font-size: 21px !important; font-weight: 900 !important;
         padding: 15px 10px !important; border-radius: 12px !important;
         border: 2px solid #050E3C !important; margin-bottom: 6px !important;
         transition: all 0.15s ease;
@@ -126,6 +126,29 @@ def extract_report_range(df):
     dfrom = pd.Timestamp(days[0]).strftime('%m/%d/%Y')
     dto = pd.Timestamp(days[-1]).strftime('%m/%d/%Y')
     return (dfrom, dto, len(days))
+
+def count_working_days(date_from, date_to):
+    """Team làm 5 ngày/tuần (Chủ Nhật→Thứ Năm), OFF Thứ Sáu & Thứ Bảy.
+    Trả về số ngày làm việc thực tế trong khoảng ngày (dùng để nhân goal thay vì nhân theo số ngày lịch)."""
+    d0 = pd.to_datetime(date_from, errors='coerce')
+    d1 = pd.to_datetime(date_to, errors='coerce')
+    if pd.isna(d0) or pd.isna(d1):
+        return 0
+    rng = pd.date_range(d0.normalize(), d1.normalize(), freq='D')
+    OFF_WEEKDAYS = [4, 5]  # pandas: Thứ Hai=0 ... Thứ Sáu=4, Thứ Bảy=5, Chủ Nhật=6
+    return int((~rng.dayofweek.isin(OFF_WEEKDAYS)).sum())
+
+def detect_period_label(date_from, date_to):
+    """Nhận diện khoảng dữ liệu là Ngày / Tuần / Tháng / Năm để hiển thị & tổng hợp cho đúng."""
+    d0 = pd.to_datetime(date_from, errors='coerce')
+    d1 = pd.to_datetime(date_to, errors='coerce')
+    if pd.isna(d0) or pd.isna(d1):
+        return "NGÀY"
+    span = (d1.normalize() - d0.normalize()).days + 1
+    if span <= 1: return "NGÀY"
+    if span <= 7: return "TUẦN"
+    if span <= 31: return "THÁNG"
+    return "NĂM"
 
 def _parse_ext_name(ext):
     if pd.isna(ext): return "Unknown"
@@ -223,10 +246,13 @@ def load_sheet_range(sheet_id, date_from, date_to):
     cols = ['Date', 'Sales Name', 'Chốt', 'Giảm số P', 'OFF']
     if pd.isna(d0) or pd.isna(d1):
         return pd.DataFrame(columns=cols)
-    frames, months_used = [], []
-    for m in range(d0.month, d1.month + 1):
-        sheet_name = MONTH_SHEET_NAMES.get(m)
+    frames, months_used, months_missing = [], [], []
+    # Dùng period_range theo THÁNG để chạy đúng khi dữ liệu là 1 tuần/1 tháng/1 năm,
+    # kể cả khi khoảng ngày vắt qua nhiều năm (vd 12/2026 -> 01/2027).
+    for p in pd.period_range(d0.to_period('M'), d1.to_period('M'), freq='M'):
+        sheet_name = MONTH_SHEET_NAMES.get(p.month)
         if not sheet_name:
+            months_missing.append(f"thang_{p.month}")
             continue
         try:
             raw = _fetch_month_raw(sheet_id, sheet_name)
@@ -236,6 +262,7 @@ def load_sheet_range(sheet_id, date_from, date_to):
         frames.append(_parse_month_sheet(raw))
         months_used.append(sheet_name)
     st.session_state['_gsheet_months_used'] = months_used
+    st.session_state['_gsheet_months_missing'] = months_missing
     if not frames:
         return pd.DataFrame(columns=cols)
     allrows = pd.concat(frames, ignore_index=True)
@@ -270,16 +297,6 @@ if 'input_df' not in st.session_state:
         "Sales Name": STAFF_LIST, "Chốt $": 0.0, "Xin OFF": False, "Giảm số P": 0.0
     }).set_index("Sales Name")
 
-def update_input():
-    if "editor_v82" in st.session_state:
-        active = st.session_state.get('active_staff', [])
-        for row_idx, changes in st.session_state["editor_v82"]["edited_rows"].items():
-            if row_idx >= len(active):
-                continue
-            name = active[row_idx]
-            for k, v in changes.items():
-                st.session_state.input_df.loc[name, k] = v
-
 # --- 5. SIDEBAR ---
 st.sidebar.markdown("# 💎 Master Dashboard")
 st.sidebar.caption(f"🛠️ Code version: **{APP_VERSION}**")
@@ -303,8 +320,7 @@ if 'page' not in st.session_state:
     st.session_state.page = "📊 Báo cáo & Biểu đồ"
 st.sidebar.markdown("---")
 st.sidebar.markdown('<div class="nav-title">📄 Chọn trang</div>', unsafe_allow_html=True)
-_nav = [("📝 Nhập doanh số & Điều chỉnh", "📝  NHẬP DOANH SỐ"),
-        ("📊 Báo cáo & Biểu đồ", "📊  BÁO CÁO & BIỂU ĐỒ"),
+_nav = [("📊 Báo cáo & Biểu đồ", "📊  BÁO CÁO & BIỂU ĐỒ"),
         ("📅 Lịch sử", "📅  LỊCH SỬ (NGÀY CŨ)")]
 for _val, _label in _nav:
     if st.sidebar.button(_label, use_container_width=True,
@@ -319,10 +335,13 @@ if uploaded_file:
     date_from, date_to, n_days = extract_report_range(df_raw)
     is_range = bool(date_from and date_to and date_from != date_to)
     report_date = date_from
+    period_label = detect_period_label(date_from, date_to) if date_from else "NGÀY"
+    working_days = count_working_days(date_from, date_to) if (is_range and date_from) else 1
     if date_from:
         if is_range:
             file_date = f"{date_from.replace('/','-')}_den_{date_to.replace('/','-')}"
-            static_time = f"{date_from} → {date_to}  ({n_days} ngày) | {now.strftime('%H:%M')}"
+            static_time = (f"{date_from} → {date_to}  ({n_days} ngày lịch, "
+                           f"{working_days} ngày làm việc) | {now.strftime('%H:%M')}")
         else:
             file_date = date_from.replace('/', '-')
             static_time = f"{date_from} | {now.strftime('%H:%M')}"
@@ -415,16 +434,20 @@ if uploaded_file:
         st.session_state.input_df.loc[active_staff, ['Chốt $', 'Xin OFF', 'Giảm số P']] = [0.0, False, 0.0]
         _n = gsheet_apply(_gs, date_from, date_to)
         _months = st.session_state.get('_gsheet_months_used', [])
+        _missing = st.session_state.get('_gsheet_months_missing', [])
         _lbl = (f"{date_from}→{date_to} (cộng dồn Chốt)" if is_range else f"ngày {date_from}")
         _mtxt = f" [tab: {', '.join(_months)}]" if _months else " [không tìm thấy tab tháng phù hợp]"
         st.sidebar.caption(f"🔗 Google Sheet: đã nạp {_n} dòng — {_lbl}{_mtxt}")
+        if _missing:
+            st.sidebar.warning(f"⚠️ Sheet chưa có tab cho: {', '.join(sorted(set(_missing)))} — Chốt $ các tháng này = 0.")
 
-    current_input_display = st.session_state.input_df.loc[active_staff]
+    staff_input_df = st.session_state.input_df.loc[active_staff]
 
-    final_df = pd.concat([current_input_display, stats], axis=1).fillna(0).reset_index()
+    final_df = pd.concat([staff_input_df, stats], axis=1).fillna(0).reset_index()
     final_df.rename(columns={'index': 'Sales Name'}, inplace=True)
 
-    _days_mult = n_days if (is_range and n_days > 0) else 1
+    # Goal nhân theo số NGÀY LÀM VIỆC thực tế (5 ngày/tuần, OFF Thứ 6 & Thứ 7) — không nhân theo số ngày lịch.
+    _days_mult = working_days if (is_range and working_days > 0) else 1
     def calculate_metrics(row):
         name = row['Sales Name']; lvl = STAFF_CONFIG.get(name, "Probation")
         target_orig = LEVEL_TARGETS.get(lvl, 9000) * _days_mult
@@ -453,15 +476,6 @@ if uploaded_file:
     _vv = final_df[~final_df['📊 RESULT'].isin(["OFF", "NO DATA"])]
     max_pct = float(_vv['pct_val'].max()) if len(_vv) and _vv['pct_val'].max() > 0 else 100.0
     final_df = final_df.reset_index(drop=True)
-
-# ==================== TRANG 1: NHẬP LIỆU ====================
-if uploaded_file and page == "📝 Nhập doanh số & Điều chỉnh":
-    st.subheader("📝 BẢNG NHẬP DOANH SỐ & ĐIỀU CHỈNH")
-    st.caption("Nhập xong, chuyển sang trang **📊 Báo cáo & Biểu đồ** ở thanh bên để xem kết quả.")
-    c1, c2, c3 = st.columns([1, 2, 1])
-    with c2:
-        st.data_editor(current_input_display, use_container_width=True, key="editor_v82",
-                       on_change=update_input, height=((len(active_staff)*35)+40))
 
 # ==================== TRANG 2: BÁO CÁO ====================
 if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
@@ -528,6 +542,40 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
         return (f'<div class="pbar"><div class="pfill" style="width:{p:.0f}%;background:{fill};"></div>'
                 f'<span style="color:{txt};">{label}</span></div>')
 
+    def _heat_style(value, vmax, rgb):
+        """Thang màu: đậm/nhạt theo giá trị lớn/nhỏ trong cột (so với giá trị max của cột)."""
+        if vmax <= 0 or value <= 0:
+            return ''
+        alpha = 0.22 + min(1.0, value / vmax) * 0.72
+        r, g, b = rgb
+        txt = '#ffffff' if alpha >= 0.50 else '#1f2937'
+        return f'style="background:rgba({r},{g},{b},{alpha:.2f});color:{txt};font-weight:900;"'
+
+    _hv = final_df[final_df['📊 RESULT'] != "NO DATA"]
+    _max_giam = float(_hv['giam_p'].max()) if len(_hv) else 0.0
+    _max_5p = float(_hv['Int_5p'].max()) if len(_hv) else 0.0
+    _max_10p = float(_hv['Int_10p'].max()) if len(_hv) else 0.0
+    _max_30p = float(_hv['Int_30p'].max()) if len(_hv) else 0.0
+    _sum5_series = _hv['Int_5p'] + _hv['Int_10p'] + _hv['Int_30p']
+    _max_sum5 = float(_sum5_series.max()) if len(_sum5_series) else 0.0
+    COL_GIAM = (245, 158, 11)   # amber
+    COL_5P   = (20, 184, 166)   # teal
+    COL_10P  = (59, 130, 246)   # blue
+    COL_30P  = (239, 68, 68)    # red
+    COL_SUM5 = (99, 102, 241)   # indigo
+
+    # Top 5 nhân viên có TỔNG CUỘC PHONE nhiều nhất — tô nổi bật theo hạng
+    _top5 = _hv.nlargest(5, 'Tong_Cuoc_Goi') if len(_hv) else _hv
+    _top5_rank = {name: i + 1 for i, name in enumerate(_top5['Sales Name'])}
+    TOP5_STYLE = {
+        1: 'background:linear-gradient(135deg,#FFD700,#F5B301);color:#5C3D00;font-weight:900;',
+        2: 'background:linear-gradient(135deg,#E2E8F0,#B8C2CC);color:#1E293B;font-weight:900;',
+        3: 'background:linear-gradient(135deg,#E8B27D,#C9793C);color:#4A2A0A;font-weight:900;',
+        4: 'background:#BFDBFE;color:#1E3A8A;font-weight:900;',
+        5: 'background:#BFDBFE;color:#1E3A8A;font-weight:900;',
+    }
+    TOP5_ICON = {1: '🥇', 2: '🥈', 3: '🥉', 4: '🏅', 5: '🏅'}
+
     rows_html = ""
     for _, r in final_df.iterrows():
         res = r['📊 RESULT']; lvl = r['🏅 LVL']
@@ -551,15 +599,28 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
         if res == "GOOD JOB": badge = '<td class="badge okb">GOOD JOB</td>'
         elif res == "OFF":    badge = '<td class="badge offb">OFF</td>'
         else:                 badge = '<td class="badge cmb">COME ON!</td>'
+        giam_style = _heat_style(r['giam_p'], _max_giam, COL_GIAM)
+        s5_style = _heat_style(s5, _max_5p, COL_5P)
+        s10_style = _heat_style(s10, _max_10p, COL_10P)
+        s30_style = _heat_style(s30, _max_30p, COL_30P)
+        sum5_style = _heat_style(s5 + s10 + s30, _max_sum5, COL_SUM5)
+        _rank = _top5_rank.get(r['Sales Name'])
+        if _rank:
+            tc_style = f'style="{TOP5_STYLE[_rank]}"'
+            tc_val = f'{TOP5_ICON[_rank]} {int(r["Tong_Cuoc_Goi"])}'
+        else:
+            tc_style = ''
+            tc_val = f'{int(r["Tong_Cuoc_Goi"])}'
         rows_html += (f'<tr><td style="font-weight:900;">{r["Sales Name"]}</td>'
                       f'<td style="background:{lvl_bg};color:{lvl_tx};font-weight:900;">{lvl}</td>'
                       f'<td {chot_style}>{chot}</td>'
                       f'<td>{format_time(r["goal_val"])}</td>'
-                      f'<td>{int(r["giam_p"])}p</td>'
+                      f'<td {giam_style}>{int(r["giam_p"])}p</td>'
                       f'<td>{format_time(r["actual_val"])}</td>'
                       f'<td>{total_bar}</td><td>{pct_bar}</td>'
-                      f'<td>{int(r["Tong_Cuoc_Goi"])}</td>'
-                      f'<td>{s5}</td><td>{s10}</td><td>{s30}</td><td><b style="font-weight:900;">{s5+s10+s30}</b></td>'
+                      f'<td {tc_style}>{tc_val}</td>'
+                      f'<td {s5_style}>{s5}</td><td {s10_style}>{s10}</td><td {s30_style}>{s30}</td>'
+                      f'<td {sum5_style}><b style="font-weight:900;">{s5+s10+s30}</b></td>'
                       f'{badge}</tr>')
     T5, T10, T30 = int(final_df["Int_5p"].sum()), int(final_df["Int_10p"].sum()), int(final_df["Int_30p"].sum())
     rows_html += (f'<tr class="tot"><td style="font-weight:900;">TOTAL</td><td></td>'
@@ -578,15 +639,15 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
         <div class="kpi"><div class="ic" style="background:#D9F0FB;">⏱️</div><div class="lb">Total Talktime</div><div class="vl">{t_t}</div></div>
         <div class="kpi"><div class="ic" style="background:#E4E7FB;">📞</div><div class="lb">Outgoing Calls</div><div class="vl">{t_c:,}</div></div>
         <div class="kpi"><div class="ic" style="background:#D6F5E5;">✅</div><div class="lb">Team hoàn thành</div><div class="vl">{team_pct:.0f}%</div></div>
-        <div class="kpi"><div class="ic" style="background:#FCEFCF;">🏆</div><div class="lb">Đạt mục tiêu</div><div class="vl">{n_done}<span style="font-size:20px;color:#94A3B8;">/{n_active}</span></div></div>
+        <div class="kpi"><div class="ic" style="background:#FCEFCF;">🏆</div><div class="lb">Đạt mục tiêu</div><div class="vl">{n_done}<span style="font-size:25px;color:#7C8798;">/{n_active}</span></div></div>
       </div>"""
 
     n_rows = len(final_df) + 1
-    box_h = 250 + n_rows * 52 + 80
+    box_h = 280 + n_rows * 64 + 90
     full_html = f"""
     <div id="reportBox" class="wrap">
       <button class="fsbtn" onclick="goFS()">⛶ Toàn màn hình</button>
-      <div class="title">🏆 WORKING RESULTS STATISTICS | {static_time} (EST)</div>
+      <div class="title">🏆 WORKING RESULTS STATISTICS ({period_label}) | {static_time} (EST)</div>
       {kpi_html}
       <table>
         <thead><tr>
@@ -603,35 +664,35 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
       body {{ margin:0; }}
       .wrap {{ padding:16px; background:#F6F9FF; position:relative; }}
       #reportBox:fullscreen {{ overflow:auto; }}
-      .fsbtn {{ position:absolute; right:18px; top:18px; z-index:9; background:#fff; color:#33507A;
-                border:1px solid #CBD8EC; border-radius:10px; padding:9px 15px; font-weight:800;
-                font-size:14px; cursor:pointer; box-shadow:0 2px 6px rgba(30,58,138,.12); }}
+      .fsbtn {{ position:absolute; right:18px; top:18px; z-index:9; background:#fff; color:#1F3A66;
+                border:1px solid #CBD8EC; border-radius:10px; padding:10px 17px; font-weight:800;
+                font-size:17.5px; cursor:pointer; box-shadow:0 2px 6px rgba(30,58,138,.12); }}
       .fsbtn:hover {{ background:#EEF4FF; }}
-      .title {{ background:linear-gradient(135deg,#0F2A5B,#1E40AF); color:#fff; text-align:center;
-                font-weight:900; font-size:26px; padding:18px; border-radius:14px; letter-spacing:.3px; }}
+      .title {{ background:linear-gradient(135deg,#0B1F45,#1D3577); color:#fff; text-align:center;
+                font-weight:900; font-size:32.5px; padding:18px; border-radius:14px; letter-spacing:.3px; }}
       .kpis {{ display:flex; gap:14px; margin:16px 0; flex-wrap:wrap; }}
       .kpi {{ flex:1; min-width:168px; text-align:center; background:#fff; border:1px solid #E6ECF5;
               border-radius:16px; padding:16px; box-shadow:0 6px 16px rgba(30,58,138,.07); }}
       .kpi .ic {{ width:48px;height:48px;border-radius:14px;margin:0 auto 8px;display:flex;
-                  align-items:center;justify-content:center;font-size:23px; }}
-      .kpi .lb {{ font-size:14px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:#7A8AA0; }}
-      .kpi .vl {{ font-size:35px;font-weight:900;color:#1B3B72; }}
+                  align-items:center;justify-content:center;font-size:29px; }}
+      .kpi .lb {{ font-size:17.5px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:#5B6B84; }}
+      .kpi .vl {{ font-size:43.75px;font-weight:900;color:#12275A; }}
       table {{ width:100%; border-collapse:separate; border-spacing:0 6px; }}
-      th {{ font-size:16.5px; font-weight:900; color:#334155; text-align:center; padding:7px 5px;
+      th {{ font-size:20.5px; font-weight:900; color:#1E293B; text-align:center; padding:9px 6px;
             text-transform:uppercase; letter-spacing:.2px; }}
-      td {{ font-size:16.5px; font-weight:800; text-align:center; padding:9px 5px; background:#fff; color:#0f172a; }}
+      td {{ font-size:20.5px; font-weight:800; text-align:center; padding:11px 6px; background:#fff; color:#0f172a; }}
       tr td:first-child {{ border-radius:12px 0 0 12px; }}
       tr td:last-child  {{ border-radius:0 12px 12px 0; }}
-      tr.nod td {{ background:#F3F6FB; color:#94A3B8; font-weight:800; }}
-      tr.tot td {{ background:#1E3A8A; color:#fff; font-weight:900; font-size:17.5px; }}
-      .pbar {{ position:relative; height:22px; background:#EEF2F8; border-radius:7px; overflow:hidden; }}
+      tr.nod td {{ background:#F3F6FB; color:#7C8798; font-weight:800; }}
+      tr.tot td {{ background:#1E3A8A; color:#fff; font-weight:900; font-size:21.9px; }}
+      .pbar {{ position:relative; height:27px; background:#EEF2F8; border-radius:8px; overflow:hidden; }}
       .pfill {{ position:absolute; left:0; top:0; bottom:0; }}
-      .pbar span {{ position:relative; z-index:2; line-height:22px; font-weight:900; font-size:14.5px; }}
+      .pbar span {{ position:relative; z-index:2; line-height:27px; font-weight:900; font-size:18px; }}
       .badge {{ border-radius:10px; font-weight:900; }}
-      .okb {{ background:#DCFCE7; color:#166534; }}
-      .cmb {{ background:#FEE2E2; color:#B91C1C; }}
-      .offb {{ background:#E2E8F0; color:#334155; }}
-      .nodb {{ background:#EEF2F8; color:#64748B; }}
+      .okb {{ background:#DCFCE7; color:#14532D; }}
+      .cmb {{ background:#FEE2E2; color:#7F1D1D; }}
+      .offb {{ background:#E2E8F0; color:#1E293B; }}
+      .nodb {{ background:#EEF2F8; color:#475569; }}
     </style>
     <script>
       function goFS() {{
@@ -645,22 +706,59 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
 
     st.markdown("#### 📋 Bảng phân tích Talktime")
     components.html(full_html, height=box_h, scrolling=True)
+    st.caption("🥇🥈🥉🏅 Cột TỔNG CUỘC: tô màu Top 5 nhân viên có số lượng cuộc gọi nhiều nhất.")
 
-    with st.expander("📋 Copy cột '% HOÀN THÀNH' để dán sang Google Sheet"):
-        st.caption("Bấm biểu tượng copy ở góc phải ô bên dưới → sang Google Sheet, chọn 1 ô rồi Ctrl+V. "
-                   "Các dòng sẽ tự đổ xuống thành 1 cột, đúng thứ tự như bảng (kèm dòng TOTAL cuối).")
-        pct_with_sign = "\n".join(f"{v:.0f}%" for v in final_df['pct_val']) + f"\n{tot_pct:.0f}%"
-        pct_plain = "\n".join(f"{v:.0f}" for v in final_df['pct_val']) + f"\n{tot_pct:.0f}"
-        cA, cB = st.columns(2)
-        with cA:
-            st.markdown("**Có dấu %** (vd 53%)")
-            st.code(pct_with_sign, language=None)
-        with cB:
-            st.markdown("**Số thường** (vd 53, dễ tính toán)")
-            st.code(pct_plain, language=None)
+    if not is_range:
+        with st.expander("📋 Copy cột '% HOÀN THÀNH' để dán sang Google Sheet"):
+            st.caption("Bấm biểu tượng copy ở góc phải ô bên dưới → sang Google Sheet, chọn 1 ô rồi Ctrl+V. "
+                       "Các dòng sẽ tự đổ xuống thành 1 cột, đúng thứ tự như bảng (kèm dòng TOTAL cuối).")
+            pct_with_sign = "\n".join(f"{v:.0f}%" for v in final_df['pct_val']) + f"\n{tot_pct:.0f}%"
+            pct_plain = "\n".join(f"{v:.0f}" for v in final_df['pct_val']) + f"\n{tot_pct:.0f}"
+            cA, cB = st.columns(2)
+            with cA:
+                st.markdown("**Có dấu %** (vd 53%)")
+                st.code(pct_with_sign, language=None)
+            with cB:
+                st.markdown("**Số thường** (vd 53, dễ tính toán)")
+                st.code(pct_plain, language=None)
 
     st.markdown("---")
-    st.markdown('<div class="main-header">📈 DASHBOARD TALKTIME</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="main-header">📈 DASHBOARD TALKTIME ({period_label})</div>', unsafe_allow_html=True)
+
+    # Dữ liệu Ring Central có thể là 1 ngày / 1 tuần / 1 tháng / 1 năm — tự tổng hợp theo đúng cấp
+    # thời gian tương ứng: NGÀY → không cần xu hướng; TUẦN → theo ngày; THÁNG → theo tuần; NĂM → theo tháng.
+    if period_label in ("TUẦN", "THÁNG", "NĂM") and len(df_active):
+        dfp = df_active.copy()
+        if period_label == "TUẦN":
+            dfp['_order'] = dfp['Start'].dt.normalize()
+            dfp['Bucket'] = dfp['Start'].dt.strftime('%a %d/%m')
+            bucket_title, x_title = "theo Ngày", "Ngày"
+        elif period_label == "THÁNG":
+            iso = dfp['Start'].dt.isocalendar()
+            dfp['_order'] = iso['week'].astype(int)
+            dfp['Bucket'] = "Tuần " + iso['week'].astype(str)
+            bucket_title, x_title = "theo Tuần", "Tuần"
+        else:  # NĂM
+            dfp['_order'] = dfp['Start'].dt.strftime('%Y%m').astype(int)
+            dfp['Bucket'] = dfp['Start'].dt.strftime('%m/%Y')
+            bucket_title, x_title = "theo Tháng", "Tháng"
+
+        trend = dfp.groupby(['_order', 'Bucket']).agg(
+            Phut=('Sec', lambda x: round(x.sum() / 60, 1)),
+            SoCuoc=('Sec', 'count'),
+        ).reset_index().sort_values('_order')
+
+        st.markdown(f"**📆 Xu hướng Talktime {bucket_title} (toàn team)**")
+        figw = px.bar(trend, x='Bucket', y='Phut', text='Phut', height=340,
+                      color='Phut', color_continuous_scale=['#E0E7FF', '#312E81'],
+                      hover_data={'SoCuoc': True})
+        figw.update_traces(texttemplate='%{text:.0f}p', textposition='outside', cliponaxis=False)
+        figw.update_layout(xaxis={'title': x_title, 'categoryorder': 'array', 'categoryarray': trend['Bucket'].tolist()},
+                           yaxis_title="Phút", plot_bgcolor='white',
+                           margin=dict(t=10, b=0, l=0, r=0), coloraxis_showscale=False)
+        st.plotly_chart(figw, use_container_width=True)
+        st.caption("Xu hướng tính gộp toàn bộ cuộc gọi outgoing hợp lệ (chưa gộp phiên chuyển máy) — "
+                   "chỉ mang tính tham khảo biến động theo thời gian, số liệu chính xác từng Sales xem ở bảng phía trên.")
 
     tt_df = final_df[~final_df['📊 RESULT'].isin(["OFF", "NO DATA"])].copy()
     if len(tt_df):
