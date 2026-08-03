@@ -4,9 +4,9 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime
 import pytz
-import os, glob
+import os, glob, re
 
-APP_VERSION = "2026.07.28-fix"  # đổi khi deploy — kiểm tra dòng này trên sidebar web
+APP_VERSION = "2026.08.03-gsheet-live"  # đổi khi deploy — kiểm tra dòng này trên sidebar web
 
 # --- 1. CẤU HÌNH TRANG & UI LUXURY ---
 st.set_page_config(page_title="Dream Talent - Henry Master Hub", layout="wide")
@@ -72,24 +72,24 @@ st.markdown("""
 
 # --- 2. DATABASE ---
 STAFF_CONFIG = {
-   "Andres Nguyen": "GOLD", 
-    "Charlie Nguyen": "GOLD", 
-    "Alan Nguyen": "GOLD", 
-    "Rio Le": "GOLD", 
+   "Andres Nguyen": "GOLD",
+    "Charlie Nguyen": "GOLD",
+    "Alan Nguyen": "GOLD",
+    "Rio Le": "GOLD",
     "Ryan Le": "GOLD",
     "Amy Tran": "SILVER",
     "William Nguyen": "SILVER",
     "Thierry Phung": "BRONZE",
-    "David Vo": "BRONZE", 
+    "David Vo": "BRONZE",
     "Kathy Bui": "BRONZE",
-    "Ivan Huynh": "Associated", 
-    "Jayce Mai": "Associated", 
-    "Jolie Nguyen": "Associated", 
+    "Ivan Huynh": "Associated",
+    "Jayce Mai": "Associated",
+    "Jolie Nguyen": "Associated",
     "Louisa Ngo": "Associated",
     "Tony Pham": "Associated",
     "Katny Duong": "Associated",
     "Liam Hoang": "Probation",
-    "Claire Dinh": "Probation", 
+    "Claire Dinh": "Probation",
     "Mia Bui": "Probation",
     "Niko Nguyen": "Probation",
     "Martin Tran": "Probation",
@@ -127,19 +127,6 @@ def extract_report_range(df):
     dto = pd.Timestamp(days[-1]).strftime('%m/%d/%Y')
     return (dfrom, dto, len(days))
 
-@st.cache_data(ttl=10, show_spinner=False)
-def _read_gsheet(url):
-    return pd.read_csv(url)
-
-import re
-def _to_off(v):
-    if pd.isna(v): return False
-    return str(v).strip().lower() in ('true', '1', 'x', 'off', 'yes', 'có', 'co')
-
-def _safe_num(v):
-    n = pd.to_numeric(v, errors='coerce')
-    return 0.0 if pd.isna(n) else float(n)
-
 def _parse_ext_name(ext):
     if pd.isna(ext): return "Unknown"
     s = str(ext).strip()
@@ -151,99 +138,133 @@ def _parse_ext_name(ext):
     if re.match(r'^\d+$', b): return a
     return b
 
-def gsheet_apply(url, date_from, date_to):
+# --- 3. GOOGLE SHEET: NGUỒN DỮ LIỆU CHỐT / GIẢM SỐ P / OFF ---
+# Sheet "Bảng Theo Dõi Sales Tháng 7 - Tháng 12/2026": mỗi tháng 1 tab (thang_7 ... thang_12).
+# Cấu trúc mỗi tab: dòng 1 = ngày (mm/dd/yyyy), lặp lại mỗi 3 cột; dòng 2 = nhãn con
+# ("" = Chốt, "Giảm số P", "OFF"); dòng 3 trở đi = dữ liệu theo TÊN (first name).
+DEFAULT_GSHEET_URL = "https://docs.google.com/spreadsheets/d/1OcOojRmbSGHthGBqfckHMZZSaImT7fKSGdoiETsdfAw/edit?gid=1882738468#gid=1882738468"
+try:
+    DEFAULT_GSHEET_URL = st.secrets.get("GSHEET_URL", DEFAULT_GSHEET_URL)
+except Exception:
+    pass
+
+MONTH_SHEET_NAMES = {7: "thang_7", 8: "thang_8", 9: "thang_9", 10: "thang_10", 11: "thang_11", 12: "thang_12"}
+
+# Tên trên Google Sheet chỉ ghi first name (Andres, Charlie...) -> map ngược về tên đầy đủ trong STAFF_LIST
+FIRST_NAME_TO_FULL = {}
+for _full in STAFF_LIST:
+    _fn = _full.split()[0]
+    if _fn in FIRST_NAME_TO_FULL:
+        st.sidebar.warning(f"⚠️ Trùng first name '{_fn}' giữa '{FIRST_NAME_TO_FULL[_fn]}' và '{_full}' — kiểm tra STAFF_CONFIG.")
+    FIRST_NAME_TO_FULL[_fn] = _full
+
+def _extract_sheet_id(url_or_id):
+    m = re.search(r'/d/([a-zA-Z0-9-_]+)', str(url_or_id))
+    return m.group(1) if m else str(url_or_id).strip()
+
+def _month_csv_url(sheet_id, sheet_name):
+    return f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
+
+def _parse_money_vn(v):
+    """Chốt $ trên sheet ghi kiểu VN: '$150,00' (dấu phẩy = thập phân)."""
+    if pd.isna(v): return 0.0
+    s = str(v).strip()
+    if s in ('', '-'): return 0.0
+    s = s.replace('$', '').replace(' ', '')
+    if ',' in s and '.' in s:
+        s = s.replace('.', '').replace(',', '.')
+    elif ',' in s:
+        s = s.replace(',', '.')
     try:
-        g = _read_gsheet(url).copy()
-    except Exception as e:
-        st.sidebar.error(f"Không đọc được Google Sheet: {e}")
-        return -1
-    g.columns = [str(c).strip() for c in g.columns]
+        return float(s)
+    except Exception:
+        return 0.0
+
+def _parse_off_flag(v):
+    if pd.isna(v): return False
+    return str(v).strip().lower() not in ('', '0', 'false', 'no', 'không', 'khong')
+
+@st.cache_data(ttl=15, show_spinner=False)
+def _fetch_month_raw(sheet_id, sheet_name):
+    url = _month_csv_url(sheet_id, sheet_name)
+    return pd.read_csv(url, header=None, dtype=str)
+
+def _parse_month_sheet(raw):
+    """Chuyển 1 tab (dạng lịch ngang) thành bảng dài: Date | Sales Name | Chốt | Giảm số P | OFF."""
+    cols = ['Date', 'Sales Name', 'Chốt', 'Giảm số P', 'OFF']
+    if raw is None or len(raw) < 3 or raw.shape[1] < 4:
+        return pd.DataFrame(columns=cols)
+    header_dates = raw.iloc[0]
+    data = raw.iloc[2:]
+    records = []
+    ncols = raw.shape[1]
+    col = 1
+    while col + 2 < ncols:
+        dt = pd.to_datetime(str(header_dates[col]).strip(), format='%m/%d/%Y', errors='coerce')
+        if pd.isna(dt):
+            col += 3
+            continue
+        for _, row in data.iterrows():
+            full = FIRST_NAME_TO_FULL.get(str(row[0]).strip())
+            if not full:
+                continue
+            records.append((
+                dt, full,
+                _parse_money_vn(row[col]),
+                _parse_money_vn(row[col + 1]),
+                _parse_off_flag(row[col + 2]),
+            ))
+        col += 3
+    return pd.DataFrame(records, columns=cols)
+
+def load_sheet_range(sheet_id, date_from, date_to):
+    d0 = pd.to_datetime(date_from, errors='coerce')
+    d1 = pd.to_datetime(date_to, errors='coerce')
+    cols = ['Date', 'Sales Name', 'Chốt', 'Giảm số P', 'OFF']
+    if pd.isna(d0) or pd.isna(d1):
+        return pd.DataFrame(columns=cols)
+    frames, months_used = [], []
+    for m in range(d0.month, d1.month + 1):
+        sheet_name = MONTH_SHEET_NAMES.get(m)
+        if not sheet_name:
+            continue
+        try:
+            raw = _fetch_month_raw(sheet_id, sheet_name)
+        except Exception as e:
+            st.sidebar.error(f"Không đọc được tab '{sheet_name}': {e}")
+            continue
+        frames.append(_parse_month_sheet(raw))
+        months_used.append(sheet_name)
+    st.session_state['_gsheet_months_used'] = months_used
+    if not frames:
+        return pd.DataFrame(columns=cols)
+    allrows = pd.concat(frames, ignore_index=True)
+    return allrows[(allrows['Date'] >= d0.normalize()) & (allrows['Date'] <= d1.normalize())]
+
+def gsheet_apply(url_or_id, date_from, date_to):
+    """Nạp Chốt $ / Xin OFF / Giảm số P từ đúng tab tháng vào input_df. Trả về số dòng đã khớp."""
+    sheet_id = _extract_sheet_id(url_or_id)
+    sel = load_sheet_range(sheet_id, date_from, date_to)
     idf = st.session_state.input_df
-    d0 = pd.to_datetime(date_from, errors='coerce'); d1 = pd.to_datetime(date_to, errors='coerce')
     single = (date_from == date_to)
-    has_date = any(c.lower() in ('date', 'ngày', 'ngay') for c in g.columns)
-
-    if has_date:
-        colmap = {}
-        for c in g.columns:
-            cl = c.lower()
-            if cl in ('date', 'ngày', 'ngay'): colmap[c] = 'Date'
-            elif cl in ('sales name', 'name', 'tên', 'ten', 'sales', 'nhân viên', 'nhan vien'): colmap[c] = 'Sales Name'
-            elif cl in ('chốt', 'chot', 'chốt $', 'premium'): colmap[c] = 'Chốt'
-            elif cl == 'off' or 'xin off' in cl or cl in ('nghỉ', 'nghi'): colmap[c] = 'OFF'
-            elif cl in ('số p', 'so p', 'giảm số p', 'giam so p', 'p', 'giảm talktime'): colmap[c] = 'Số P'
-        g = g.rename(columns=colmap)
-        if 'Sales Name' not in g.columns:
-            return 0
-        g['_d'] = pd.to_datetime(g['Date'].astype(str).str.strip(), errors='coerce')
-        sel = g[(g['_d'] >= d0) & (g['_d'] <= d1)].copy()
-        sel['_nm'] = sel['Sales Name'].astype(str).str.strip()
-        n = 0
-        if single:
-            for nm in sel['_nm'].unique():
-                if nm not in idf.index: continue
-                r = sel[sel['_nm'] == nm].iloc[-1]
-                if 'Chốt' in sel.columns:
-                    idf.loc[nm, 'Chốt $'] = _safe_num(r.get('Chốt'))
-                if 'OFF' in sel.columns:
-                    idf.loc[nm, 'Xin OFF'] = _to_off(r.get('OFF'))
-                if 'Số P' in sel.columns:
-                    idf.loc[nm, 'Giảm số P'] = _safe_num(r.get('Số P'))
-                n += 1
-        else:
-            if 'Chốt' in sel.columns:
-                sel['_c'] = pd.to_numeric(sel['Chốt'], errors='coerce').fillna(0)
-                for nm, val in sel.groupby('_nm')['_c'].sum().items():
-                    if nm in idf.index: idf.loc[nm, 'Chốt $'] = float(val); n += 1
-        return n
-
-    name_col = g.columns[0]
-    for c in g.columns:
-        if c.lower() in ('sales name', 'name', 'tên', 'ten', 'sales', 'nhân viên', 'nhan vien'):
-            name_col = c; break
-    daymap = {}
-    for c in g.columns:
-        if c == name_col: continue
-        m = re.match(r'\s*(\d{1,2})', c)
-        if not m: continue
-        day = int(m.group(1)); cl = c.lower()
-        if 'chốt' in cl or 'chot' in cl or 'premium' in cl: fld = 'Chốt'
-        elif 'off' in cl or 'nghỉ' in cl or 'nghi' in cl: fld = 'OFF'
-        elif 'giảm' in cl or 'giam' in cl or 'talktime' in cl or cl.strip().endswith(' p') or 'số p' in cl: fld = 'Giảm'
-        else: continue
-        daymap.setdefault(day, {})[fld] = c
-    if not daymap:
-        st.sidebar.warning("Google Sheet chưa đúng format (cần cột kiểu '28 Chốt', '28 OFF'…).")
-        return 0
-    if single:
-        days = [d0.day]
-    else:
-        days = []
-        cur = d0.normalize()
-        while cur <= d1.normalize():
-            if cur.day in daymap:
-                days.append(cur.day)
-            cur += pd.Timedelta(days=1)
     n = 0
-    for _, row in g.iterrows():
-        nm = str(row[name_col]).strip()
-        if nm not in idf.index: continue
-        if single:
-            f = daymap.get(days[0], {})
-            if 'Chốt' in f:
-                idf.loc[nm, 'Chốt $'] = _safe_num(row.get(f['Chốt']))
-            if 'OFF' in f:
-                idf.loc[nm, 'Xin OFF'] = _to_off(row.get(f['OFF']))
-            if 'Giảm' in f:
-                idf.loc[nm, 'Giảm số P'] = _safe_num(row.get(f['Giảm']))
-        else:
-            tot = sum(_safe_num(row.get(daymap.get(d, {}).get('Chốt'))) for d in days
-                      if daymap.get(d, {}).get('Chốt'))
-            idf.loc[nm, 'Chốt $'] = float(tot)
-        n += 1
+    if single:
+        for nm, g in sel.groupby('Sales Name'):
+            if nm not in idf.index: continue
+            r = g.iloc[-1]
+            idf.loc[nm, 'Chốt $'] = float(r['Chốt'])
+            idf.loc[nm, 'Xin OFF'] = bool(r['OFF'])
+            idf.loc[nm, 'Giảm số P'] = float(r['Giảm số P'])
+            n += 1
+    else:
+        agg = sel.groupby('Sales Name')['Chốt'].sum()
+        for nm, val in agg.items():
+            if nm not in idf.index: continue
+            idf.loc[nm, 'Chốt $'] = float(val)
+            n += 1
     return n
 
-# --- 3. SESSION STATE ---
+# --- 4. SESSION STATE ---
 if 'input_df' not in st.session_state:
     st.session_state.input_df = pd.DataFrame({
         "Sales Name": STAFF_LIST, "Chốt $": 0.0, "Xin OFF": False, "Giảm số P": 0.0
@@ -259,27 +280,21 @@ def update_input():
             for k, v in changes.items():
                 st.session_state.input_df.loc[name, k] = v
 
-# --- 4. SIDEBAR ---
+# --- 5. SIDEBAR ---
 st.sidebar.markdown("# 💎 Master Dashboard")
 st.sidebar.caption(f"🛠️ Code version: **{APP_VERSION}**")
 uploaded_file = st.sidebar.file_uploader("📂 Tải file RingCentral", type=["csv"])
 
-DEFAULT_GSHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTv1WZPG26RYVV4p1e3CuTW59OcLH18udmg0FvE_IaNZn8B0S7Ki0TzD5ENxDbWolGL7y42kn7PsHcA/pub?output=csv"
-_default_gs = DEFAULT_GSHEET_URL
-try:
-    _default_gs = st.secrets.get("GSHEET_CSV_URL", DEFAULT_GSHEET_URL)
-except Exception:
-    _default_gs = DEFAULT_GSHEET_URL
-with st.sidebar.expander("🔗 Google Sheet nhập liệu", expanded=False):
-    gs_url = st.text_input("Link CSV published của Google Sheet",
-                           value=st.session_state.get("gsheet_url", _default_gs),
-                           help="Đã gắn sẵn link. Đổi link khác thì dán vào đây.")
+with st.sidebar.expander("🔗 Google Sheet Chốt / Giảm số P / OFF", expanded=False):
+    gs_url = st.text_input("Link Google Sheet (hoặc Sheet ID)",
+                           value=st.session_state.get("gsheet_url", DEFAULT_GSHEET_URL),
+                           help="Mặc định đã gắn sẵn link 'Bảng Theo Dõi Sales Tháng 7 - Tháng 12/2026'.")
     st.session_state["gsheet_url"] = gs_url
     if st.button("🔄 Đồng bộ lại từ Google Sheet", use_container_width=True):
-        st.session_state.pop("gs_synced", None)
-        _read_gsheet.clear()
+        _fetch_month_raw.clear()
         st.rerun()
-    st.caption("Nhập Chốt/OFF/Số P theo NGÀY trên Google Sheet — web tự lấy đúng range ngày trong file CSV. Tự cập nhật ~10 giây/lần.")
+    st.caption("Web tự chọn đúng tab **thang_7 → thang_12** theo tháng của dữ liệu RingCentral đang tải lên "
+               "(khoảng ngày lệch qua nhiều tháng sẽ tự gộp nhiều tab). Tự làm mới ~15 giây/lần.")
 
 HISTORY_DIR = "history"
 os.makedirs(HISTORY_DIR, exist_ok=True)
@@ -399,9 +414,10 @@ if uploaded_file:
     if _gs and date_from:
         st.session_state.input_df.loc[active_staff, ['Chốt $', 'Xin OFF', 'Giảm số P']] = [0.0, False, 0.0]
         _n = gsheet_apply(_gs, date_from, date_to)
-        if _n >= 0:
-            _lbl = (f"{date_from}→{date_to} (cộng dồn Chốt)" if is_range else f"ngày {date_from}")
-            st.sidebar.caption(f"🔗 Google Sheet: đã nạp {_n} dòng — {_lbl}")
+        _months = st.session_state.get('_gsheet_months_used', [])
+        _lbl = (f"{date_from}→{date_to} (cộng dồn Chốt)" if is_range else f"ngày {date_from}")
+        _mtxt = f" [tab: {', '.join(_months)}]" if _months else " [không tìm thấy tab tháng phù hợp]"
+        st.sidebar.caption(f"🔗 Google Sheet: đã nạp {_n} dòng — {_lbl}{_mtxt}")
 
     current_input_display = st.session_state.input_df.loc[active_staff]
 
@@ -627,7 +643,7 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
     </script>
     """
 
-    st.markdown("#### 📋 Bảng kết quả")
+    st.markdown("#### 📋 Bảng phân tích Talktime")
     components.html(full_html, height=box_h, scrolling=True)
 
     with st.expander("📋 Copy cột '% HOÀN THÀNH' để dán sang Google Sheet"):
@@ -643,6 +659,23 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
             st.markdown("**Số thường** (vd 53, dễ tính toán)")
             st.code(pct_plain, language=None)
 
+    st.markdown("---")
+    st.markdown('<div class="main-header">📈 DASHBOARD TALKTIME</div>', unsafe_allow_html=True)
+
+    tt_df = final_df[~final_df['📊 RESULT'].isin(["OFF", "NO DATA"])].copy()
+    if len(tt_df):
+        tt_df['Talktime_Min'] = (tt_df['Actual_Sec'] / 60).round(1)
+        tt_df = tt_df.sort_values('Talktime_Min', ascending=False)
+        st.markdown("**⏱️ Tổng Talktime theo Sales (phút)**")
+        figt = px.bar(tt_df, x='Sales Name', y='Talktime_Min', text='Talktime_Min', height=380,
+                      color='Talktime_Min', color_continuous_scale=['#DBEAFE', '#1E3A8A'],
+                      hover_data={'Chốt $': ':$,.0f', 'Tong_Cuoc_Goi': True})
+        figt.update_traces(texttemplate='%{text:.0f}p', textposition='outside', cliponaxis=False)
+        figt.update_layout(xaxis={'title': None, 'tickangle': -40, 'categoryorder': 'total descending'},
+                            yaxis_title="Phút", plot_bgcolor='white',
+                            margin=dict(t=10, b=0, l=0, r=0), coloraxis_showscale=False)
+        st.plotly_chart(figt, use_container_width=True)
+
     chart_df = final_df[~final_df['📊 RESULT'].isin(["OFF", "NO DATA"])].copy()
     if len(chart_df):
         def _status(r):
@@ -654,6 +687,7 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
         order = ["✅ Đạt (≥100%)", "🟡 Gần đạt (70–99%)", "🔴 Còn xa (<70%)"]
         chart_df = chart_df.sort_values('pct_val', ascending=False)
 
+        st.markdown("**🎯 % Hoàn thành mục tiêu talktime**")
         fig = px.bar(chart_df, x='Sales Name', y='pct_val', color='Trạng thái',
                      color_discrete_map=color_map, category_orders={'Trạng thái': order},
                      text='pct_val', height=400,
@@ -672,7 +706,7 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
     if len(line_df):
         line_df['Interest'] = line_df['Int_5p'] + line_df['Int_10p'] + line_df['Int_30p']
         tot_5p = int((final_df['Int_5p'] + final_df['Int_10p'] + final_df['Int_30p']).sum())
-        st.markdown(f'<div class="main-header">📈 CUỘC GỌI CHẤT LƯỢNG ≥5 PHÚT | TỔNG: {tot_5p} CUỘC</div>', unsafe_allow_html=True)
+        st.markdown(f"**📞 Cuộc gọi chất lượng ≥5 phút | Tổng: {tot_5p} cuộc**")
         figl = px.line(line_df, x='Sales Name', y='Interest', markers=True, text='Interest', height=340)
         figl.update_traces(line=dict(color='#050E3C', width=3),
                            marker=dict(size=10, color='#1e3a8a', line=dict(color='white', width=1.5)),
@@ -684,6 +718,22 @@ if uploaded_file and page == "📊 Báo cáo & Biểu đồ":
             font=dict(size=13, color='#050E3C'))
         figl.update_yaxes(rangemode='tozero', gridcolor='#e2e8f0')
         st.plotly_chart(figl, use_container_width=True)
+
+    lvl_df = final_df[~final_df['📊 RESULT'].isin(["OFF", "NO DATA"])].copy()
+    if len(lvl_df):
+        lvl_agg = lvl_df.groupby('🏅 LVL').agg(
+            Talktime_Min=('Actual_Sec', lambda x: round(x.sum() / 60, 1)),
+            Chốt=('Chốt $', 'sum'),
+            Người=('Sales Name', 'count'),
+        ).reset_index()
+        st.markdown("**🏅 Tổng hợp theo cấp bậc (LVL)**")
+        figv = px.bar(lvl_agg, x='🏅 LVL', y='Talktime_Min', text='Talktime_Min', height=320,
+                      color='🏅 LVL', color_discrete_map=LEVEL_COLORS,
+                      hover_data={'Chốt': ':$,.0f', 'Người': True})
+        figv.update_traces(texttemplate='%{text:.0f}p', textposition='outside', cliponaxis=False)
+        figv.update_layout(xaxis_title=None, yaxis_title="Tổng phút", plot_bgcolor='white',
+                           showlegend=False, margin=dict(t=10, b=0, l=0, r=0))
+        st.plotly_chart(figv, use_container_width=True)
 
     snapshot = final_df[['Sales Name', '🏅 LVL', 'Xin OFF', 'Chốt $',
                          'goal_val', 'giam_p', 'actual_val', 'total_val', 'pct_val',
