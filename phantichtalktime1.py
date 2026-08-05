@@ -150,6 +150,32 @@ def detect_period_label(date_from, date_to):
     if span <= 31: return "THÁNG"
     return "NĂM"
 
+def dedup_extension_placeholder_rows(df_raw):
+    """RingCentral đôi khi ghi 2 dòng cho CÙNG 1 cuộc gọi Outgoing:
+    - dòng 'nháp' lúc cuộc gọi mới định tuyến qua tổng đài: cột From = SỐ EXTENSION nội bộ (vd '290')
+    - dòng 'hoàn chỉnh' khi cuộc gọi đã ra line ngoài: cột From = SỐ ĐIỆN THOẠI thật (vd '(678) 680-5004')
+    Bình thường dòng nháp mãi ở trạng thái 'In Progress' (0 giây, vô hại). Nhưng nếu export đúng lúc cuộc
+    gọi vừa kết thúc, cả 2 dòng đều có thời lượng đầy đủ -> bị đếm dư 1 cuộc + dư talktime khi chạy file
+    tổng nhiều extension (dòng nháp không xuất hiện trong file chỉ lọc riêng 1 extension).
+    Xoá dòng nháp khi đã có dòng hoàn chỉnh trùng Extension/Ngày/Giờ/Số gọi đến/Thời lượng."""
+    if 'From' not in df_raw.columns or 'Extension' not in df_raw.columns or 'Direction' not in df_raw.columns:
+        return df_raw, 0
+    d = df_raw.reset_index(drop=True)
+    ext_num = d['Extension'].astype(str).str.extract(r'^\s*(\d+)')[0]
+    is_outgoing = d['Direction'].astype(str).str.strip().str.lower() == 'outgoing'
+    is_placeholder = is_outgoing & (d['From'].astype(str).str.strip() == ext_num)
+    if not is_placeholder.any():
+        return d, 0
+    key_cols = ['Extension', 'Date', 'Time', 'To', 'Duration']
+    real_keys = d.loc[is_outgoing & ~is_placeholder, key_cols].drop_duplicates().copy()
+    real_keys['_has_real'] = True
+    merged = d.merge(real_keys, on=key_cols, how='left')
+    drop_mask = (is_placeholder & merged['_has_real'].fillna(False)).to_numpy()
+    n_removed = int(drop_mask.sum())
+    if n_removed == 0:
+        return d, 0
+    return d.loc[~drop_mask].reset_index(drop=True), n_removed
+
 def _parse_ext_name(ext):
     if pd.isna(ext): return "Unknown"
     s = str(ext).strip()
@@ -331,6 +357,7 @@ page = st.session_state.page
 if uploaded_file:
     df_raw = pd.read_csv(uploaded_file)
     df_raw.columns = df_raw.columns.str.strip()
+    df_raw, n_dedup = dedup_extension_placeholder_rows(df_raw)
 
     date_from, date_to, n_days = extract_report_range(df_raw)
     is_range = bool(date_from and date_to and date_from != date_to)
@@ -345,6 +372,9 @@ if uploaded_file:
         else:
             file_date = date_from.replace('/', '-')
             static_time = f"{date_from} | {now.strftime('%H:%M')}"
+
+    if n_dedup:
+        st.sidebar.caption(f"🧹 Đã gộp {n_dedup} dòng bị RingCentral log trùng (cuộc gọi Outgoing bị ghi 2 dòng).")
 
     n_incoming = 0
     if 'Direction' in df_raw.columns:
