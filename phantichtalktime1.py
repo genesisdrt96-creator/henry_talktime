@@ -90,7 +90,7 @@ STAFF_CONFIG = {
     "Katny Duong": "Associated",
     "Liam Hoang": "Probation",
     "Claire Dinh": "Probation",
-    "Mia Bui": "Probation",
+    "Mia Bui": "Associated",
     "Niko Nguyen": "Probation",
     "Martin Tran": "Probation",
     "Ray Duong": "Probation",
