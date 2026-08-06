@@ -310,10 +310,11 @@ def gsheet_apply(url_or_id, date_from, date_to):
             idf.loc[nm, 'Giảm số P'] = float(r['Giảm số P'])
             n += 1
     else:
-        agg = sel.groupby('Sales Name')['Chốt'].sum()
-        for nm, val in agg.items():
+        agg = sel.groupby('Sales Name')[['Chốt', 'Giảm số P']].sum()
+        for nm, row in agg.iterrows():
             if nm not in idf.index: continue
-            idf.loc[nm, 'Chốt $'] = float(val)
+            idf.loc[nm, 'Chốt $'] = float(row['Chốt'])
+            idf.loc[nm, 'Giảm số P'] = float(row['Giảm số P'])
             n += 1
     return n
 
@@ -465,7 +466,7 @@ if uploaded_file:
         _n = gsheet_apply(_gs, date_from, date_to)
         _months = st.session_state.get('_gsheet_months_used', [])
         _missing = st.session_state.get('_gsheet_months_missing', [])
-        _lbl = (f"{date_from}→{date_to} (cộng dồn Chốt)" if is_range else f"ngày {date_from}")
+        _lbl = (f"{date_from}→{date_to} (cộng dồn Chốt & Giảm số P)" if is_range else f"ngày {date_from}")
         _mtxt = f" [tab: {', '.join(_months)}]" if _months else " [không tìm thấy tab tháng phù hợp]"
         st.sidebar.caption(f"🔗 Google Sheet: đã nạp {_n} dòng — {_lbl}{_mtxt}")
         if _missing:
@@ -490,9 +491,9 @@ if uploaded_file:
             return pd.Series([lvl, target_orig, giam_p, 0, 0, 0.0, "NO DATA"])
         if is_range:
             goal = target_orig
-            total = actual
+            total = actual + giam_p * 60
             pct = 100.0 if goal <= 0 else total / goal * 100
-            return pd.Series([lvl, goal, 0.0, actual, total, round(float(pct), 1),
+            return pd.Series([lvl, goal, giam_p, actual, total, round(float(pct), 1),
                               "GOOD JOB" if pct >= 100 else "COME ON!"])
         is_done = sales >= 2000
         bonus = 1800 if 300 <= sales < 500 else (2700 if 500 <= sales < 1000 else (5400 if 1000 <= sales < 2000 else 0))
