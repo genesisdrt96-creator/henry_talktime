@@ -94,7 +94,7 @@ STAFF_CONFIG = {
     "Niko Nguyen": "Probation",
     "Martin Tran": "Probation",
     "Ray Duong": "Probation",
-    "Marky Huynh": "Probation",
+    "Hannah Nguyen": "Probation",
     "Jane Luong": "Probation",
     "Johan Nguyen": "Probation",
 }
