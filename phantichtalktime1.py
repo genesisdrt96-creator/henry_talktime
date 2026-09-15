@@ -95,6 +95,7 @@ STAFF_CONFIG = {
     "Hannah Nguyen": "Probation",
     "Jane Luong": "Probation",
     "Johan Nguyen": "Probation",
+    "Ace Nguyen": "Probation"
 }
 STAFF_LIST = list(STAFF_CONFIG.keys())
 LEVEL_TARGETS = {"GOLD": 9000, "SILVER": 9000, "BRONZE": 9000, "Associated": 9000, "Probation": 9000}
