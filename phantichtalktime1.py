@@ -89,7 +89,6 @@ STAFF_CONFIG = {
     "Katny Duong": "Associated",
     "Mia Bui": "Associated",
     "Liam Hoang": "Probation",
-    "Claire Dinh": "Probation",
     "Niko Nguyen": "Probation",
     "Martin Tran": "Probation",
     "Hannah Nguyen": "Probation",
