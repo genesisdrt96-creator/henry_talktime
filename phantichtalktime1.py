@@ -94,10 +94,10 @@ STAFF_CONFIG = {
     "Hannah Nguyen": "Probation",
     "Jane Luong": "Probation",
     "Johan Nguyen": "Probation",
-    "Ace Nguyen": "Probation"
-    "Kai Phung": "Probation"
-    "Adrian Lu": "Probation"
-"Andy Nguyen": "Probation"
+    "Ace Nguyen": "Probation",
+    "Kai Phung": "Probation",
+    "Adrian Lu": "Probation",
+"Andy Nguyen": "Probation",
 "Lucius Nguyen": "Probation"
 }
 STAFF_LIST = list(STAFF_CONFIG.keys())
