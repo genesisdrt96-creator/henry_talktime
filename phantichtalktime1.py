@@ -74,6 +74,7 @@ st.markdown("""
 STAFF_CONFIG = {
    "Andres Nguyen": "GOLD",
     "Charlie Nguyen": "GOLD",
+    "Alan Nguyen": "GOLD",
     "Rio Le": "GOLD",
     "Ryan Le": "GOLD",
     "Amy Tran": "SILVER",
