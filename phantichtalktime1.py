@@ -93,7 +93,6 @@ STAFF_CONFIG = {
     "Martin Tran": "Probation",
     "Hannah Nguyen": "Probation",
     "Jane Luong": "Probation",
-    "Johan Nguyen": "Probation",
     "Ace Nguyen": "Probation",
     "Kai Phung": "Probation",
     "Adrian Lu": "Probation",
