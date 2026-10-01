@@ -74,7 +74,6 @@ st.markdown("""
 STAFF_CONFIG = {
    "Andres Nguyen": "GOLD",
     "Charlie Nguyen": "GOLD",
-    "Alan Nguyen": "GOLD",
     "Rio Le": "GOLD",
     "Ryan Le": "GOLD",
     "Amy Tran": "SILVER",
@@ -90,7 +89,6 @@ STAFF_CONFIG = {
     "Katny Duong": "Associated",
     "Mia Bui": "Associated",
     "Liam Hoang": "Probation",
-    "Niko Nguyen": "Probation",
     "Martin Tran": "Probation",
     "Hannah Nguyen": "Probation",
     "Jane Luong": "Probation",
