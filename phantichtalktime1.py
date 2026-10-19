@@ -89,14 +89,16 @@ STAFF_CONFIG = {
     "Katny Duong": "Associated",
     "Mia Bui": "Associated",
     "Liam Hoang": "Probation",
-    "Martin Tran": "Probation",
+    "Martin Tran": "Associated",
     "Hannah Nguyen": "Probation",
     "Jane Luong": "Probation",
     "Ace Nguyen": "Probation",
     "Kai Phung": "Probation",
     "Adrian Lu": "Probation",
-"Andy Nguyen": "Probation",
-"Lucius Nguyen": "Probation"
+    "Andy Nguyen": "Probation",
+    "Elio Mach": "Probation",
+    "Airi Cao": "Probation",
+    "Lucius Nguyen": "Probation"
 }
 STAFF_LIST = list(STAFF_CONFIG.keys())
 LEVEL_TARGETS = {"GOLD": 9000, "SILVER": 9000, "BRONZE": 9000, "Associated": 9000, "Probation": 9000}
